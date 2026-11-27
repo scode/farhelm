@@ -400,6 +400,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     add(id, label, &[help, ntfy::INTRO], Target::NtfySwitch(switch))
                 };
                 entries.push(switch(ntfy::Switch::Enabled));
+                entries.push(switch(ntfy::Switch::Waiting));
                 for field in ntfy::Field::ALL {
                     let (id, label, help) = field.words();
                     let extra: &[&str] = match field {

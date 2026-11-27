@@ -32,22 +32,29 @@ fn baseline_and_new_waiting_session() {
     let now = Instant::now();
     let mut policy = Policy::default();
     let baseline = observation("old", SessionStatus::Waiting);
-    assert!(policy.observe(&[baseline], now).is_empty());
+    assert!(policy.observe(&[baseline], now, true).is_empty());
     assert!(
         policy
-            .observe(&[observation("old", SessionStatus::Waiting)], now + SETTLE)
+            .observe(
+                &[observation("old", SessionStatus::Waiting)],
+                now + SETTLE,
+                true
+            )
             .is_empty()
     );
     let list = [
         observation("old", SessionStatus::Waiting),
         observation("new", SessionStatus::Waiting),
     ];
-    assert!(policy.observe(&list, now + SETTLE).is_empty());
-    assert_eq!(policy.observe(&list, now + SETTLE * 2), vec!["title new"]);
-    assert!(policy.observe(&list, now + SETTLE * 3).is_empty());
+    assert!(policy.observe(&list, now + SETTLE, true).is_empty());
+    assert_eq!(
+        policy.observe(&list, now + SETTLE * 2, true),
+        vec!["title new"]
+    );
+    assert!(policy.observe(&list, now + SETTLE * 3, true).is_empty());
     assert!(
         Policy::default()
-            .observe(&list, now + SETTLE * 4)
+            .observe(&list, now + SETTLE * 4, true)
             .is_empty()
     );
 }
@@ -60,24 +67,24 @@ fn settle_flicker_and_reentry() {
     let mut policy = Policy::default();
     let running = [observation("one", SessionStatus::Running)];
     let waiting = [observation("one", SessionStatus::Waiting)];
-    assert!(policy.observe(&running, now).is_empty());
-    assert!(policy.observe(&waiting, now).is_empty());
+    assert!(policy.observe(&running, now, true).is_empty());
+    assert!(policy.observe(&waiting, now, true).is_empty());
     assert!(
         policy
-            .observe(&waiting, now + SETTLE - Duration::from_nanos(1))
+            .observe(&waiting, now + SETTLE - Duration::from_nanos(1), true)
             .is_empty()
     );
-    assert!(policy.observe(&running, now + SETTLE).is_empty());
-    assert!(policy.observe(&waiting, now + SETTLE).is_empty());
+    assert!(policy.observe(&running, now + SETTLE, true).is_empty());
+    assert!(policy.observe(&waiting, now + SETTLE, true).is_empty());
     assert_eq!(
-        policy.observe(&waiting, now + SETTLE * 2),
+        policy.observe(&waiting, now + SETTLE * 2, true),
         vec!["title one"]
     );
-    assert!(policy.observe(&waiting, now + SETTLE * 3).is_empty());
-    assert!(policy.observe(&running, now + SETTLE * 3).is_empty());
-    assert!(policy.observe(&waiting, now + SETTLE * 3).is_empty());
+    assert!(policy.observe(&waiting, now + SETTLE * 3, true).is_empty());
+    assert!(policy.observe(&running, now + SETTLE * 3, true).is_empty());
+    assert!(policy.observe(&waiting, now + SETTLE * 3, true).is_empty());
     assert_eq!(
-        policy.observe(&waiting, now + SETTLE * 4),
+        policy.observe(&waiting, now + SETTLE * 4, true),
         vec!["title one"]
     );
 }
@@ -88,41 +95,100 @@ fn settle_flicker_and_reentry() {
 fn unknown_exit_and_removal() {
     let now = Instant::now();
     let mut policy = Policy::default();
-    policy.observe(&[], now);
-    policy.observe(&[observation("one", SessionStatus::Waiting)], now);
+    policy.observe(&[], now, true);
+    policy.observe(&[observation("one", SessionStatus::Waiting)], now, true);
     assert!(
         policy
-            .observe(&[observation("one", SessionStatus::Unknown)], now + SETTLE)
+            .observe(
+                &[observation("one", SessionStatus::Unknown)],
+                now + SETTLE,
+                true
+            )
             .is_empty()
     );
     assert_eq!(
-        policy.observe(&[observation("one", SessionStatus::Waiting)], now + SETTLE),
+        policy.observe(
+            &[observation("one", SessionStatus::Waiting)],
+            now + SETTLE,
+            true
+        ),
         vec!["title one"]
     );
-    policy.observe(&[observation("two", SessionStatus::Waiting)], now + SETTLE);
+    policy.observe(
+        &[observation("two", SessionStatus::Waiting)],
+        now + SETTLE,
+        true,
+    );
     policy.observe(
         &[observation(
             "two",
             SessionStatus::Exited { exit_code: Some(0) },
         )],
         now + SETTLE * 2,
+        true,
     );
     assert!(
         policy
             .observe(
                 &[observation("two", SessionStatus::Waiting)],
-                now + SETTLE * 2
+                now + SETTLE * 2,
+                true
             )
             .is_empty()
     );
-    policy.observe(&[], now + SETTLE * 3);
+    policy.observe(&[], now + SETTLE * 3, true);
     assert!(
         policy
             .observe(
                 &[observation("two", SessionStatus::Waiting)],
-                now + SETTLE * 4
+                now + SETTLE * 4,
+                true
             )
             .is_empty()
+    );
+}
+
+/// With alerts off, spells used to keep settling and be marked handled while the sender dropped their alerts. Off now
+/// keeps no evidence, and turning alerts on is a fresh baseline, as after a reconnect (the plan
+/// `agent-blocked-notifications`). Specified: a session that waits past the settle time while alerts are off returns
+/// nothing; once they are on, the first listing is the baseline (the session still waiting gets no alert for this
+/// wait), a session that starts waiting after it alerts once it has waited the settle time, and the first session
+/// alerts again after it stops waiting and waits anew.
+#[farhelm_testtrace::test]
+fn alerts_off_keep_no_evidence_and_turning_them_on_is_a_fresh_baseline() {
+    let now = Instant::now();
+    let mut policy = Policy::default();
+    let waiting = [observation("one", SessionStatus::Waiting)];
+    assert!(policy.observe(&[], now, true).is_empty());
+    assert!(policy.observe(&waiting, now, false).is_empty());
+    assert!(policy.observe(&waiting, now + SETTLE * 2, false).is_empty());
+    assert!(policy.observe(&waiting, now + SETTLE * 3, true).is_empty());
+    assert!(
+        policy.observe(&waiting, now + SETTLE * 5, true).is_empty(),
+        "the wait under way when alerts came on is the baseline's"
+    );
+    let both = [
+        observation("one", SessionStatus::Waiting),
+        observation("two", SessionStatus::Waiting),
+    ];
+    assert!(policy.observe(&both, now + SETTLE * 5, true).is_empty());
+    assert_eq!(
+        policy.observe(&both, now + SETTLE * 6, true),
+        vec!["title two"]
+    );
+    let one_running = [
+        observation("one", SessionStatus::Running),
+        observation("two", SessionStatus::Waiting),
+    ];
+    assert!(
+        policy
+            .observe(&one_running, now + SETTLE * 6, true)
+            .is_empty()
+    );
+    assert!(policy.observe(&both, now + SETTLE * 7, true).is_empty());
+    assert_eq!(
+        policy.observe(&both, now + SETTLE * 8, true),
+        vec!["title one"]
     );
 }
 
@@ -277,6 +343,7 @@ fn client() -> reqwest::Client {
 /// field lets tests separate saved state from an unsaved request draft.
 fn save(server: &str, token: Option<&str>, enabled: bool) -> SaveSettings {
     SaveSettings {
+        notify_waiting: Some(true),
         enabled,
         server_url: server.into(),
         topic: TOPIC.into(),
@@ -363,6 +430,44 @@ async fn settings_secret_lifecycle_and_persistence() {
         reopened.ntfy_config().await.unwrap().token.as_deref(),
         Some(TOKEN)
     );
+}
+
+/// The host refresh decides whether to track waiting spells from the store's cache, never from the database, so the
+/// cache must follow every save and survive a reopen; and a client older than the waiting switch saves without it, which
+/// must not turn waiting alerts back on. Specified: a fresh store reads off; saving alerts on with the waiting switch on
+/// reads on; the same with the waiting switch off reads off; a save without the switch stores it still off and reads
+/// off; on again, then a reopen of the same database reads on before anything else is asked.
+#[farhelm_testtrace::test]
+async fn the_waiting_cache_follows_saves_and_reopens() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("helm.db");
+    let store = HelmStore::open(&path).await.unwrap();
+    assert!(!store.waiting_alerts_enabled());
+    store
+        .save_ntfy_config(save("https://ntfy.sh", None, true))
+        .await
+        .ok()
+        .unwrap();
+    assert!(store.waiting_alerts_enabled());
+    let mut waiting_off = save("https://ntfy.sh", None, true);
+    waiting_off.notify_waiting = Some(false);
+    store.save_ntfy_config(waiting_off).await.ok().unwrap();
+    assert!(!store.waiting_alerts_enabled());
+    let mut older_client = save("https://ntfy.sh", None, true);
+    older_client.notify_waiting = None;
+    let kept = store.save_ntfy_config(older_client).await.ok().unwrap();
+    assert!(
+        !kept.notify_waiting && !store.waiting_alerts_enabled(),
+        "a save without the switch keeps it off"
+    );
+    store
+        .save_ntfy_config(save("https://ntfy.sh", None, true))
+        .await
+        .ok()
+        .unwrap();
+    drop(store);
+    let reopened = HelmStore::open(&path).await.unwrap();
+    assert!(reopened.waiting_alerts_enabled());
 }
 
 /// Only the URL origin owns a retained token: path/topic edits and equivalent

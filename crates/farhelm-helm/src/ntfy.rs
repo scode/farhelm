@@ -20,7 +20,10 @@ use std::{
 };
 use tokio::{sync::mpsc, time::Instant};
 
-pub(crate) const SETTLE: Duration = Duration::from_secs(10);
+/// How long a session must read Waiting before its alert goes out. With the host refresh every 3 seconds, a single
+/// Waiting reading still sends nothing, while two polls in a row do. The plan `agent-blocked-notifications` shortened it from
+/// 10 seconds.
+pub(crate) const SETTLE: Duration = Duration::from_secs(3);
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const QUEUE_CAPACITY: usize = 32;
 const PER_MINUTE: usize = 5;
@@ -82,6 +85,10 @@ impl Config {
                 topic: save.topic,
                 priority: save.priority,
                 token_set: token.is_some(),
+                // An older client's save omits the switch and keeps it as stored.
+                notify_waiting: save
+                    .notify_waiting
+                    .unwrap_or(previous.settings.notify_waiting),
             },
             token,
         })
@@ -117,6 +124,13 @@ enum Spell {
 /// Connection-local evidence starts empty after every reconnect, rather than
 /// consulting a durable cache that survives helm restarts. A first successful
 /// list is the baseline; removals and resolved non-waiting readings end spells.
+///
+/// While waiting alerts are off the policy keeps no evidence at all, and the
+/// first listing after they come back on is a fresh baseline: a session already
+/// waiting then alerts only for its next wait, the same rule as after a
+/// reconnect. Spells used to keep settling while alerts were off, each marked
+/// handled while the sender dropped its alert; keeping nothing makes "off" mean
+/// the policy does no work and holds no state that outlives the switch.
 #[derive(Default)]
 pub(crate) struct Policy {
     initialized: bool,
@@ -124,9 +138,25 @@ pub(crate) struct Policy {
 }
 
 impl Policy {
-    /// Consume one accepted listing at an injected monotonic time. Returned
-    /// titles have settled once; queue failures must not turn into later retries.
-    pub(crate) fn observe(&mut self, list: &[Observation], now: Instant) -> Vec<String> {
+    /// Consume one accepted listing at an injected monotonic time, with
+    /// `enabled` saying whether waiting alerts would be sent now
+    /// ([`Settings::sends_waiting_alerts`], read from the store's cache so the
+    /// refresh path never waits on the database). Returned titles have settled
+    /// once; queue failures must not turn into later retries.
+    pub(crate) fn observe(
+        &mut self,
+        list: &[Observation],
+        now: Instant,
+        enabled: bool,
+    ) -> Vec<String> {
+        if !enabled {
+            if self.initialized {
+                tracing::debug!("ntfy waiting alerts are off; dropping waiting evidence");
+            }
+            self.spells.clear();
+            self.initialized = false;
+            return Vec::new();
+        }
         let ids: HashSet<_> = list.iter().map(|s| s.id.as_str()).collect();
         self.spells.retain(|id, _| ids.contains(id.as_str()));
         let mut alerts = Vec::new();
@@ -136,14 +166,20 @@ impl Policy {
                 SessionStatus::Waiting => {
                     let spell = self.spells.entry(session.id.clone()).or_insert_with(|| {
                         if self.initialized {
+                            tracing::debug!(session = %session.id, "waiting spell started");
                             Spell::Pending(now)
                         } else {
+                            tracing::debug!(
+                                session = %session.id,
+                                "session already waiting at the baseline; no alert for this wait"
+                            );
                             Spell::Handled
                         }
                     });
                     if let Spell::Pending(since) = spell
                         && now.saturating_duration_since(*since) >= SETTLE
                     {
+                        tracing::info!(session = %session.id, "waiting spell settled; queueing an ntfy alert");
                         alerts.push(session.title.clone());
                         *spell = Spell::Handled;
                     }
@@ -268,7 +304,10 @@ impl Alerts {
                         continue;
                     }
                 };
-                if !config.settings.enabled || config.settings.topic.is_empty() {
+                // The policy stops tracking spells once alerts are off, but an
+                // alert queued just before a save turned them off still lands here.
+                if !config.settings.sends_waiting_alerts() {
+                    tracing::debug!("ntfy waiting alerts are off; dropping a queued alert");
                     continue;
                 }
                 let Some(dropped) = window.admit(Instant::now()) else {
@@ -282,6 +321,7 @@ impl Alerts {
                     }
                 };
                 let Some(host) = host else {
+                    tracing::debug!("ntfy alert's host is gone; dropping alert");
                     continue;
                 };
                 let name = crate::aggregate::host_display_name(
@@ -297,8 +337,9 @@ impl Alerts {
                 if dropped > 0 {
                     body.push_str(&format!(" (and {dropped} more)"));
                 }
-                if let Err(reason) = post(task_client.as_ref(), &config, body).await {
-                    tracing::warn!(%reason, "ntfy alert failed; dropping alert");
+                match post(task_client.as_ref(), &config, body).await {
+                    Ok(()) => tracing::info!("ntfy waiting alert sent"),
+                    Err(reason) => tracing::warn!(%reason, "ntfy alert failed; dropping alert"),
                 }
             }
         });
@@ -442,6 +483,40 @@ pub(crate) enum SaveError {
     Storage,
 }
 
+/// Whether the stored configuration sends waiting alerts, read straight from a
+/// connection inside a [`HelmStore`] open's blocking task, to seed its cache. A
+/// database without the table yet (an older schema an offline open accepts)
+/// sends none; any other failure is an error for [`seed_waiting_alerts`].
+pub(crate) fn sends_waiting_alerts_in(conn: &rusqlite::Connection) -> anyhow::Result<bool> {
+    let table: bool = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'ntfy_alerts'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !table {
+        return Ok(false);
+    }
+    let json: String = conn.query_row(
+        "SELECT config FROM ntfy_alerts WHERE singleton = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(serde_json::from_str::<Config>(&json)?
+        .settings
+        .sends_waiting_alerts())
+}
+
+/// [`sends_waiting_alerts_in`] for every store open: a failure is logged and
+/// counts as off. A row this build cannot read (one a newer build wrote, say)
+/// costs the waiting alerts, as it always cost every ntfy alert, and must not
+/// stop the helm from starting; saving the settings again replaces it.
+pub(crate) fn seed_waiting_alerts(conn: &rusqlite::Connection) -> bool {
+    sends_waiting_alerts_in(conn).unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not read whether ntfy waiting alerts are on; treating them as off");
+        false
+    })
+}
+
 impl HelmStore {
     /// Read dedicated helm configuration, never the shared preference snapshot.
     pub(crate) async fn ntfy_config(&self) -> anyhow::Result<Config> {
@@ -460,7 +535,13 @@ impl HelmStore {
     /// Bind token preservation to the stored server inside one database operation.
     /// A stale client supplies no secret, so its origin change must clear the
     /// current token even if that token was saved after the form loaded.
+    ///
+    /// The store's cache of whether waiting alerts go out
+    /// ([`HelmStore::waiting_alerts_enabled`]) is updated inside the same
+    /// database call, so two saves racing each other leave it agreeing with
+    /// whichever row the database kept.
     pub(crate) async fn save_ntfy_config(&self, save: SaveSettings) -> Result<Settings, SaveError> {
+        let waiting = self.ntfy_waiting_cache();
         let result = self
             .conn()
             .call("ntfy settings save", move |conn| {
@@ -477,6 +558,10 @@ impl HelmStore {
                     "UPDATE ntfy_alerts SET config = ?1 WHERE singleton = 1",
                     [serde_json::to_string(&config)?],
                 )?;
+                waiting.store(
+                    config.settings.sends_waiting_alerts(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 Ok(Ok(config.settings))
             })
             .await

@@ -6262,12 +6262,17 @@ installation it is on, so it follows an open session the sidebar's filter hides
 The helm observes fresh accepted session listings inside each host connection's refresh loop. Its connection-local
 policy takes a small projection of session id, title and raw status, with an injected monotonic time; it never derives
 transitions from the restart-persistent session cache. The first successful list baselines waiting sessions. Subsequent
-waiting spells settle for 10 seconds on successful refresh observations and emit once. Unknown does not advance a spell,
-resolved non-waiting ends it, and removed sessions discard it. A discarded walk, failed cache write or withdrawn
-connection contributes no evidence. Equal suffixes on different entries belong to their separate connection-local
-policies. The raw projection precedes Unknown retention in the cache, including for identity-less hosts, so a cached
-Waiting value cannot fabricate new evidence. Publication and enqueue are checked under the connection's status read lock
-after the guarded publish, preventing a retarget during publication from alerting for the withdrawn connection.
+waiting spells settle for 3 seconds on successful refresh observations and emit once. Each observation also takes
+whether waiting alerts go out now (master switch, waiting switch and a topic), read from a flag the helm store seeds
+when it opens and updates inside each ntfy save's database call, so the refresh path never awaits the database for it.
+While that flag is off the policy drops every spell and un-baselines, so nothing is consumed while alerts are off and
+the first observation after they come back on is a fresh baseline. Spell starts, baselines, settles, drops and sends are
+logged with session ids only, never titles. Unknown does not advance a spell, resolved non-waiting ends it, and removed
+sessions discard it. A discarded walk, failed cache write or withdrawn connection contributes no evidence. Equal
+suffixes on different entries belong to their separate connection-local policies. The raw projection precedes Unknown
+retention in the cache, including for identity-less hosts, so a cached Waiting value cannot fabricate new evidence.
+Publication and enqueue are checked under the connection's status read lock after the guarded publish, preventing a
+retarget during publication from alerting for the withdrawn connection.
 
 The manager owns one bounded 32-item queue and one sender task, also shared with AppState. Refresh uses try-send only.
 The sender reads the current dedicated settings and host display name; title and host characters that
