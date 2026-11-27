@@ -378,25 +378,36 @@ async fn assert_identity_stays(
 
 /// Extract the value a resume command must receive from a durable capture.
 ///
-/// Claude keeps its persistent conversation id directly in the column. Codex
-/// keeps a locator there so a later refresh can revalidate the exact
-/// transcript; its resume argv must instead name the persistent thread id.
+/// Claude keeps its conversation id in the column, bare or inside a `claude:`
+/// locator that adds the transcript Restart checks for; either way the id is
+/// what its resume argv names. Codex keeps a locator there so a later refresh
+/// can revalidate the exact transcript; its resume argv must instead name the
+/// persistent thread id.
 /// This helper deliberately proves that observable argv effect without
 /// asserting the locator's incidental JSON layout beyond the field needed to
 /// identify the vendor's real resume target.
 fn resume_identity(conversation: &str) -> String {
-    let Some(locator) = conversation.strip_prefix("codex:") else {
+    let Some((locator, field)) = conversation
+        .strip_prefix("codex:")
+        .map(|locator| (locator, "thread_id"))
+        .or_else(|| {
+            conversation
+                .strip_prefix("claude:")
+                .map(|locator| (locator, "session_id"))
+        })
+    else {
         return conversation.to_string();
     };
     serde_json::from_str::<serde_json::Value>(locator)
-        .expect("the stored Codex locator is valid JSON")
-        .get("thread_id")
+        .expect("the stored locator is valid JSON")
+        .get(field)
         .and_then(serde_json::Value::as_str)
-        .expect("a resumable Codex locator carries its persistent thread id")
+        .expect("a resumable locator carries the id its resume names")
         .to_string()
 }
 
-/// Extract the exact runtime id the hook reported. Stored locators carry other evidence for the later resume check.
+/// Extract the exact runtime id the hook reported. Stored locators carry other evidence for the later resume check
+/// (Claude's, the transcript Restart checks for).
 fn reported_runtime_identity(conversation: &str) -> String {
     let Some((locator, field)) = conversation
         .strip_prefix("codex:")
@@ -404,6 +415,11 @@ fn reported_runtime_identity(conversation: &str) -> String {
         .or_else(|| {
             conversation
                 .strip_prefix("grok:")
+                .map(|locator| (locator, "session_id"))
+        })
+        .or_else(|| {
+            conversation
+                .strip_prefix("claude:")
                 .map(|locator| (locator, "session_id"))
         })
     else {
@@ -609,13 +625,14 @@ async fn real_claude_session_reports_its_identity_across_clear() {
         &cleared,
     );
 
+    // The hook log names the id Claude reported; the stored values may be locators carrying its transcript.
     let log = hook_log_lines(state.path(), &session.id);
     assert!(
-        hook_log_has_source(&log, &first, "startup"),
+        hook_log_has_source(&log, &reported_runtime_identity(&first), "startup"),
         "claude must report at process start with source `startup`: {log:?}"
     );
     assert!(
-        hook_log_has_source(&log, &cleared, "clear"),
+        hook_log_has_source(&log, &reported_runtime_identity(&cleared), "clear"),
         "claude must report again after /clear with source `clear`: {log:?}"
     );
 
@@ -725,6 +742,8 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     .await;
     let parent =
         wait_for_reported_identity(&sup, &client, state.path(), &session.id, None, 120).await;
+    // The hook log names reported ids, while `parent` is the stored value, which may be a locator.
+    let parent_id = reported_runtime_identity(&parent);
 
     let prompt = "Use your Bash tool to run exactly this command and nothing else: sh ./child.sh";
     client.send_keys(chan, prompt.as_bytes().to_vec()).await;
@@ -741,7 +760,9 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
                 farhelm_supervisor::hook_report::parse_log_line(line).is_some_and(|entry| {
                     entry.word == "no-credential"
                         || matches!(entry.word, "refused" | "acked")
-                            && entry.identity().is_some_and(|identity| identity != parent)
+                            && entry
+                                .identity()
+                                .is_some_and(|identity| identity != parent_id)
                 })
             })
             .map(str::to_string)

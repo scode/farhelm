@@ -125,7 +125,7 @@
 //!   `{farhelm_args}` expands to on start and on resume, and the legacy
 //!   [`AgentIntegration::inject_hooks`]), the exhaustive
 //!   per-kind functions below (workspace trust, ownership, locators, resume verification,
-//!   report vocabularies, executable names), and one file per kind
+//!   report vocabularies, stored-conversation acceptance, executable names), and one file per kind
 //!   (`antigravity.rs`, `claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `muse.rs`, `omp.rs`, `pi.rs`) for
 //!   that kind's own helpers: argv grammar, record and locator parsing, and
 //!   the vendor-file verification some locators need. The
@@ -139,7 +139,7 @@
 //!   resume verification, launch provenance):
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
 //!   exhaustive matches. Claude, Muse, Antigravity and custom agents share `vendor/positional.rs`
-//!   with explicit per-kind event, record-verification and correction-notice policies; every
+//!   with explicit per-kind event, record-verification, stored-value and correction-notice policies; every
 //!   pinned kind (those plus Codex and Grok) judges its process pin through `judge_report_pin`
 //!   in `vendor/mod.rs`.
 //! - **Process-tree attribution:** `procs/positional.rs` and the durable `ReportPin`
@@ -333,7 +333,9 @@ pub const INSTRUCTIONS_POINTER: &str = "farhelm: when the user writes \"$farhelm
 /// whole history. Missing required metadata inside this prefix is a refusal.
 const RECORD_PREFIX_BYTES: usize = 64 * 1024;
 
-use farhelm_proto::conversation::{MAX_CONVERSATION_ID_LEN, OMP_LOCATOR_PREFIX, PI_LOCATOR_PREFIX};
+use farhelm_proto::conversation::{
+    CLAUDE_LOCATOR_PREFIX, MAX_CONVERSATION_ID_LEN, OMP_LOCATOR_PREFIX, PI_LOCATOR_PREFIX,
+};
 
 pub use farhelm_proto::conversation::{is_reserved_locator_token, validate_named_conversation};
 
@@ -348,15 +350,25 @@ pub const MAX_LOCATOR_BYTES: usize = 8 * 1024;
 
 /// Which vendor's locator spelling a conversation token claims.
 ///
-/// The two harnesses share one locator SHAPE (a versioned JSON object carrying
+/// These harnesses share one locator SHAPE (a versioned JSON object carrying
 /// the session id and optional exact file) but never share a wire token: the
 /// prefix is part of the identity, and a locator reported for one vendor is
-/// never accepted for the other. Closed rather than stringly-typed so a new
-/// harness cannot silently inherit both prefixes' rejection rules.
+/// never accepted for another. Closed rather than stringly-typed so a new
+/// harness cannot silently inherit another prefix's rejection rules.
+///
+/// The file means different things per vendor. For Pi and OMP it is the
+/// resume selector, required before Restart is offered and verified against
+/// the vendor's record header. For Claude the session id is the selector and
+/// the file is only a hint of whether Claude saved anything yet: the
+/// supervisor builds the locator itself at admission from the hook's
+/// `transcript_path`, and Restart only checks whether that file exists.
+/// Claude never enters the Pi/OMP record verification
+/// ([`verifies_resume_target`] stays false for it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocatorVendor {
     Pi,
     Omp,
+    Claude,
 }
 
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -367,6 +379,7 @@ impl LocatorVendor {
         match self {
             LocatorVendor::Pi => PI_LOCATOR_PREFIX,
             LocatorVendor::Omp => OMP_LOCATOR_PREFIX,
+            LocatorVendor::Claude => CLAUDE_LOCATOR_PREFIX,
         }
     }
 
@@ -376,6 +389,7 @@ impl LocatorVendor {
         match self {
             LocatorVendor::Pi => "Pi",
             LocatorVendor::Omp => "OMP",
+            LocatorVendor::Claude => "Claude",
         }
     }
 }
@@ -2129,8 +2143,12 @@ impl IntegrationSnapshot {
             }
             AgentKind::Pi => self.typed_locator_offer(LocatorVendor::Pi, captured),
             AgentKind::Omp => self.typed_locator_offer(LocatorVendor::Omp, captured),
-            AgentKind::Claude
-            | AgentKind::Goose
+            // The id is the selector whether or not a transcript came with it: a `claude:` locator resumes its id,
+            // and a bare id from an older build resumes as it always did.
+            AgentKind::Claude => {
+                self.plain_id_offer(captured.and_then(claude::session_id).as_deref())
+            }
+            AgentKind::Goose
             | AgentKind::Muse
             | AgentKind::Antigravity
             | AgentKind::Custom
@@ -2151,7 +2169,7 @@ impl IntegrationSnapshot {
     }
 
     /// The offer for an integrated kind whose identity is a plain
-    /// conversation id (Claude, Goose, Muse). Unintegrated kinds never reach here,
+    /// conversation id (Goose, Muse, and Claude's id read out of its locator). Unintegrated kinds never reach here,
     /// but stay in the caller's arm so the match names every
     /// kind rather than hiding one behind a wildcard.
     fn plain_id_offer(&self, captured: Option<&str>) -> RestartOffer {
@@ -2213,8 +2231,8 @@ impl IntegrationSnapshot {
                 .ok()?
                 .resume_id()?
                 .to_string(),
-            AgentKind::Claude
-            | AgentKind::Goose
+            AgentKind::Claude => claude::session_id(conversation)?,
+            AgentKind::Goose
             | AgentKind::Muse
             | AgentKind::Antigravity
             | AgentKind::Custom
@@ -2304,9 +2322,16 @@ fn accepts_unversioned_ownership(kind: AgentKind) -> bool {
     }
 }
 
-/// The typed-locator vocabulary a kind's reported identity uses, or `None`
-/// for a kind whose identity is not a typed locator (a plain id, Codex's and
-/// Grok's own locators, or no identity at all).
+/// The typed-locator vocabulary a kind's REPORTED identity uses, whose saved
+/// file Restart verifies against the vendor's record (`verify_report_only_resume`),
+/// or `None` for a kind whose identity is not such a locator (a plain id,
+/// Codex's and Grok's own locators, or no identity at all).
+///
+/// Claude is `None` although Farhelm may store a `claude:` locator for it: its
+/// hook reports a plain id, the supervisor adds the transcript itself, and that
+/// file is only checked for existence at Restart, never verified as a record.
+/// Answering `Some` here would send Claude into the Pi/OMP verification, which
+/// would refuse every Claude Restart (Claude has no record header to parse).
 #[warn(clippy::wildcard_enum_match_arm)]
 pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
     match kind {
@@ -2461,7 +2486,28 @@ pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
     }
 }
 
-/// Validate a reported identity against the durable kind before any write.
+/// Whether `value`, read back from a hook-reported capture, is one this build can use for `kind`. The same as
+/// [`accepts_reported_conversation`] except for Claude, the one kind whose stored value differs from what its hook
+/// reports: admission accepts only a plain id from the hook, then may store it as a `claude:` locator carrying the
+/// transcript Claude named ([`claude::stored_conversation`]), so a stored Claude value is either form.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub fn accepts_stored_conversation(kind: AgentKind, value: &str) -> bool {
+    match kind {
+        AgentKind::Claude => claude::session_id(value).is_some(),
+        AgentKind::Pi
+        | AgentKind::Omp
+        | AgentKind::Grok
+        | AgentKind::Codex
+        | AgentKind::Goose
+        | AgentKind::Muse
+        | AgentKind::Antigravity
+        | AgentKind::Custom
+        | AgentKind::Generic => accepts_reported_conversation(kind, value),
+    }
+}
+
+/// Validate a reported identity against the durable kind before any write. This is the hook's raw value: for
+/// Claude a plain id, never a `claude:` locator, which only the supervisor itself builds.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
     match kind {
@@ -3901,7 +3947,7 @@ mod tests {
     /// lines. Genuine reporters send compact JSON, which still parses.
     #[farhelm_testtrace::test]
     fn locators_with_control_characters_are_refused() {
-        for vendor in [LocatorVendor::Pi, LocatorVendor::Omp] {
+        for vendor in [LocatorVendor::Pi, LocatorVendor::Omp, LocatorVendor::Claude] {
             let encoded = encode_locator(
                 vendor,
                 SessionLocator {
@@ -3933,12 +3979,29 @@ mod tests {
     /// argv element. A fileless report remains valid but deliberately removes
     /// Resume. The two vendors' tokens are also cross-rejected: neither
     /// spelling parses as the other's locator, and neither passes a plain-id
-    /// kind's acceptance.
+    /// kind's acceptance. Only the vendors whose file is the resume selector;
+    /// Claude's locator, whose id is the selector, has its own test
+    /// (`a_claude_locator_resumes_its_id_and_stores_only_what_validates`).
     #[farhelm_testtrace::test]
     fn locator_round_trips_hostile_paths_and_controls_the_offer() {
-        for (vendor, argv0, kind) in [
-            (LocatorVendor::Pi, "pi", AgentKind::Pi),
-            (LocatorVendor::Omp, "omp", AgentKind::Omp),
+        // Each vendor with its counterpart, the vendor whose tokens it must refuse.
+        for (vendor, argv0, kind, other, other_argv0, other_kind) in [
+            (
+                LocatorVendor::Pi,
+                "pi",
+                AgentKind::Pi,
+                LocatorVendor::Omp,
+                "omp",
+                AgentKind::Omp,
+            ),
+            (
+                LocatorVendor::Omp,
+                "omp",
+                AgentKind::Omp,
+                LocatorVendor::Pi,
+                "pi",
+                AgentKind::Pi,
+            ),
         ] {
             let locator = SessionLocator {
                 version: 1,
@@ -4001,10 +4064,6 @@ mod tests {
 
             // Cross-vendor rejection is symmetrical, and a locator is also
             // never accepted as a plain id by the id-reporting kinds.
-            let other = match vendor {
-                LocatorVendor::Pi => LocatorVendor::Omp,
-                LocatorVendor::Omp => LocatorVendor::Pi,
-            };
             assert!(parse_locator(other, &encoded).is_err());
             for plain_kind in [
                 AgentKind::Claude,
@@ -4014,18 +4073,10 @@ mod tests {
             ] {
                 assert!(!accepts_reported_conversation(plain_kind, &encoded));
             }
-            let own_kind = match vendor {
-                LocatorVendor::Pi => AgentKind::Pi,
-                LocatorVendor::Omp => AgentKind::Omp,
-            };
-            assert!(accepts_reported_conversation(own_kind, &encoded));
+            assert!(accepts_reported_conversation(kind, &encoded));
             // The OTHER vendor's snapshot refuses this token at the OFFER and
             // SUBSTITUTION boundaries too — the durable decision points, not
             // just the parser.
-            let (other_argv0, other_kind) = match other {
-                LocatorVendor::Pi => ("pi", AgentKind::Pi),
-                LocatorVendor::Omp => ("omp", AgentKind::Omp),
-            };
             let other_snapshot = test_snapshot(
                 other_kind,
                 composed_resume(other_argv0, &["--resume", CONVERSATION_PLACEHOLDER]),
@@ -4056,6 +4107,109 @@ mod tests {
                     "{malformed:?} never substitutes into a {vendor:?} template"
                 );
             }
+        }
+    }
+
+    /// Claude's locator is the one whose file is a hint rather than the
+    /// selector: Restart resumes the session id whether or not a transcript
+    /// came with it, and a report whose path cannot be stored must still
+    /// capture its id, or the new check would cost capture. Specified: an
+    /// absolute path (hostile to shell-word parsing) is stored as a `claude:`
+    /// locator that round-trips, offers Resume and fills the template with
+    /// the id alone; no path, a null, a non-string, a relative path and one
+    /// holding a control character each store the bare id; a bare id from an
+    /// older build still offers and fills; a malformed `claude:` token and a
+    /// locator whose id is itself reserved neither offer, fill nor pass as a
+    /// stored value; and the locator is a valid stored Claude value but never
+    /// a raw Claude report, nor any other kind's value.
+    #[farhelm_testtrace::test]
+    fn a_claude_locator_resumes_its_id_and_stores_only_what_validates() {
+        let snapshot = test_snapshot(
+            AgentKind::Claude,
+            composed_resume("claude", &["--resume", CONVERSATION_PLACEHOLDER]),
+        );
+        let resumed = |id: &str| Some(vec!["claude".to_string(), "--resume".into(), id.into()]);
+        let path = "/home/u/.claude/projects/-tmp-a b/quote-\"-雪.jsonl";
+        let stored = claude::stored_conversation("conv-1", Some(&serde_json::json!(path)));
+        assert_eq!(
+            parse_locator(LocatorVendor::Claude, &stored).expect("a locator was stored"),
+            SessionLocator {
+                version: 1,
+                session_id: "conv-1".to_string(),
+                session_file: Some(path.to_string()),
+            }
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some(&stored), 0),
+            RestartOffer::Resume
+        );
+        assert_eq!(snapshot.filled_resume_argv(&stored), resumed("conv-1"));
+
+        for unusable in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!(7)),
+            Some(serde_json::json!("relative/conv-1.jsonl")),
+            Some(serde_json::json!("/tmp/conv\n1.jsonl")),
+            Some(serde_json::json!(format!("/{}", "a".repeat(5000)))),
+        ] {
+            assert_eq!(
+                claude::stored_conversation("conv-1", unusable.as_ref()),
+                "conv-1",
+                "{unusable:?} stores the bare id"
+            );
+        }
+        assert_eq!(
+            snapshot.restart_offer(Some("conv-1"), 0),
+            RestartOffer::Resume
+        );
+        assert_eq!(snapshot.filled_resume_argv("conv-1"), resumed("conv-1"));
+
+        let reserved_id = encode_locator(
+            LocatorVendor::Claude,
+            SessionLocator {
+                version: 1,
+                session_id: "pi:x".to_string(),
+                session_file: Some("/tmp/x.jsonl".to_string()),
+            },
+        )
+        .expect("the premise: a reserved id is still a plausible one");
+        for refused in [
+            "claude:{".to_string(),
+            "claude:nonsense".to_string(),
+            reserved_id,
+        ] {
+            assert_eq!(
+                snapshot.restart_offer(Some(&refused), 0),
+                RestartOffer::NotCaptured,
+                "{refused:?}"
+            );
+            assert!(
+                snapshot.filled_resume_argv(&refused).is_none(),
+                "{refused:?}"
+            );
+            assert!(
+                !accepts_stored_conversation(AgentKind::Claude, &refused),
+                "{refused:?}"
+            );
+        }
+
+        assert!(accepts_stored_conversation(AgentKind::Claude, &stored));
+        assert!(accepts_stored_conversation(AgentKind::Claude, "conv-1"));
+        assert!(
+            !accepts_reported_conversation(AgentKind::Claude, &stored),
+            "only the supervisor builds a Claude locator; the hook reports a plain id"
+        );
+        for other in [
+            AgentKind::Muse,
+            AgentKind::Goose,
+            AgentKind::Antigravity,
+            AgentKind::Custom,
+            AgentKind::Pi,
+            AgentKind::Omp,
+            AgentKind::Codex,
+        ] {
+            assert!(!accepts_stored_conversation(other, &stored), "{other:?}");
         }
     }
 

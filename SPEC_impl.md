@@ -4614,6 +4614,21 @@ no path values are stored in the notice.
   `SubagentStop`; reports carrying a sub-agent marker remain dropped. These observations do not establish behavior for
   other Claude versions or every permission mode.
 
+  **Claude's stored transcript.** Claude's hook reports a plain conversation ID, and admission alone may store more: the
+  `transcript_path` Claude sent with the same report, beside the ID, as a `claude:` locator (`LocatorVendor::Claude`,
+  Pi's and OMP's `SessionLocator` shape under its own reserved prefix). The path comes from Claude's own report, never
+  from Claude's directory layout, so keeping it is verification evidence, not identification. It is kept so that Restart
+  can tell whether Claude saved the conversation yet; the ID stays the resume selector, so a locator offers and fills
+  exactly what the bare ID would. The locator is built only after every check that reads the raw ID, and a report whose
+  path is absent, not a string, relative, oversized or holding a control character stores the bare ID instead: the path
+  only improves Restart and must never cost capture. Only Claude's positional policy stores one; Muse, Antigravity and
+  custom agents keep plain IDs. A raw report is still accepted only as a plain ID (`accepts_reported_conversation`), so
+  a hook cannot submit a `claude:` token itself, while a stored value read back may be either form
+  (`accepts_stored_conversation`). Claude's file is never verified as a record: `locator_vendor` stays `None` for
+  Claude, which keeps it out of the Pi/OMP pre-resume verification, and `verifies_resume_target` stays false. Captures
+  stored as bare IDs by older builds stay resumable unchanged. A capture that moves from a bare ID to a locator for the
+  same conversation posts no notification; only the supervisor's log notes that the stored value changed.
+
   **Muse positional ownership.** Muse shares Claude's positional corridor and pinned plain-ID admission, including the
   capture claim, authoritative kind/generation reload, complete-binding-plus-pin CAS, preserved original ancestors,
   dead-pin release only outside the full incoming chain, and unknown-liveness refusal. Its versioned native executable

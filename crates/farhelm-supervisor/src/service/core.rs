@@ -16155,12 +16155,16 @@ impl Supervisor {
         );
         // Repeated lifecycle reports for the same identity are routine. A
         // replacement deserves its own diagnostic because it changes what the
-        // next restart will target, including a pending foreground clear.
+        // next restart will target, including a pending foreground clear. The
+        // stored value can also change form for the same conversation (a
+        // Claude id from an older build gaining its transcript as a `claude:`
+        // locator), so the line says the stored value changed, not that the
+        // conversation did.
         if let Some(was) = displaced {
             info!(
                 session = %id, was = %was, now = %conversation,
-                "this session's agent reported a conversation identity that replaces the \
-                 one previously claimed for it"
+                "this session's stored conversation value changed: the report replaces the \
+                 value previously claimed for it"
             );
         }
         Ok(crate::hook_report::ReportAdmission::Committed { generation })
@@ -23353,6 +23357,109 @@ pub(crate) mod tests {
         assert_eq!(
             scanned.committed_conversation(),
             Some(format!("conv-{scanned_id}").as_str())
+        );
+    }
+
+    /// Claude's start report can land before its session's entry is
+    /// published, and then only the capture pass copies the stored value into
+    /// the entry the session list reads. That value is now the `claude:`
+    /// locator admission builds, which the plain-id check for raw reports would
+    /// refuse, leaving Restart unavailable until Claude's first Stop.
+    /// Specified: a hook-sourced Claude row holding a locator, with an entry
+    /// published only afterwards, gets that locator mirrored by the capture
+    /// pass and offers Resume.
+    #[farhelm_testtrace::test]
+    async fn the_capture_pass_mirrors_a_claude_locator_stored_before_publication() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let integration = program_snapshot("claude");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
+                    id: id.clone(),
+                    parent: None,
+                    title: "Claude".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: state.path().to_str().unwrap().into(),
+                    launch: farhelm_proto::SessionLaunch::Legacy {
+                        invocation: "claude".into(),
+                        agent_kind: AgentKind::Claude,
+                        resume_template: integration.resume_template.clone(),
+                    },
+                    terminal_address: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    launch_hooked: false,
+                    handoff_marker_expected: false,
+                    launch_boot_ended: false,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let locator = crate::agent_kind::claude::stored_conversation(
+            "conv-1",
+            Some(&serde_json::json!(
+                "/home/u/.claude/projects/-tmp/conv-1.jsonl"
+            )),
+        );
+        assert!(
+            locator.starts_with(farhelm_proto::conversation::CLAUDE_LOCATOR_PREFIX),
+            "the fixture premise: a locator, not a bare id"
+        );
+        assert!(
+            sup.store
+                .record_reported_conversation(&id, 0, &locator)
+                .await
+                .unwrap(),
+            "the fixture premise: the locator is stored as a hook report"
+        );
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = integration;
+        let entry = Arc::new(entry);
+        assert_eq!(
+            entry.run.capture.lock().unwrap().committed_conversation(),
+            None,
+            "the fixture premise: the published entry has not seen the report"
+        );
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        sup.capture_now().await;
+        assert_eq!(
+            entry.run.capture.lock().unwrap().committed_conversation(),
+            Some(locator.as_str())
+        );
+        assert_eq!(
+            super::super::status::entry_info(&entry).restart_offer,
+            RestartOffer::Resume
         );
     }
 
