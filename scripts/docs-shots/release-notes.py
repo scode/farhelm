@@ -10,6 +10,7 @@ private fleet before adding the shot. The capture skips images that are already 
 """
 
 import json
+import socket
 
 from docs_shots import Callout, Shot
 
@@ -440,6 +441,150 @@ SHOTS += [
         annotations=[
             Callout("id:prompt-alternative-0", "Replace this session with the agent's approval prompts enabled.",
                     side="right"),
+        ],
+    ),
+]
+
+# --- v0.46.0 --------------------------------------------------------------------------------------------------------
+
+STOPPED_SESSIONS = ("release notes", "review deployment logs")
+
+
+def blocked_alerts(bridge):
+    """Show the waiting and blocked switches together without configuring an ntfy destination."""
+    bridge.click("id:app-settings-toggle")
+    bridge.click("id:settings-section-notifications")
+    # The form is below the sounds and notification switches on this page.
+    bridge.scroll_into_view("id:ntfy-heading")
+    bridge.scroll_into_view("id:ntfy-blocked-criteria")
+    bridge.wait("id:ntfy-blocked")
+
+
+def mark_stopped_session(bridge, title):
+    """Send the modifier click to this run's private bridge. Its CLI only exposes ordinary clicks."""
+    target = f"id:session-row-{{session:{title}}}"
+    bridge.wait(target)
+    box = json.loads(bridge._call("get", "box", bridge.resolve(target), "--json"))
+    window, = json.loads(bridge._call("windows", "--json"))
+    position = {"x": box["x"] + box["w"] / 2, "y": box["y"] + box["h"] / 2}
+    events = [
+        {"type": event, **position, "modifiers": {"control": True}}
+        for event in ("mouse_move", "mouse_down", "mouse_up")
+    ]
+    request = {"cmd": "input", "window": window["window"], "events": events}
+    session_dir = bridge.run / "agent" / bridge.gui.SESSION
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as app:
+        app.settimeout(5)
+        app.connect(str(session_dir / "app.sock"))
+        app.sendall((json.dumps(request) + "\n").encode())
+        with app.makefile("r") as replies:
+            reply = json.loads(replies.readline())
+    if "ok" not in reply:
+        raise RuntimeError(f"could not mark {title!r}: {reply}")
+
+
+def restart_replace_bar(bridge):
+    """Mark two stopped sessions so the bar offers Restart/Replace. Clear the marks after the shot."""
+    def clear_marks():
+        """Restore the unmarked sidebar shared by the other captures."""
+        bridge.click("id:session-marked-clear")
+        bridge.wait_gone_text("2 marked")
+
+    for title in STOPPED_SESSIONS:
+        mark_stopped_session(bridge, title)
+    bridge.wait_text("2 marked")
+    bridge.wait("id:session-marked-start")
+    return clear_marks
+
+
+def right_click_session(bridge):
+    """Open the session's actions at the pointer without making it the current session."""
+    row = bridge.resolve(f"id:session-row-{{session:{LOOSE_SESSION}}}")
+    bridge._call("click", row, "--right")
+    bridge.wait("id:session-menu")
+
+
+def replace_held_destination(bridge):
+    """Show what Replace with holds fixed before choosing an agent or confirming the replacement."""
+    open_session_actions(bridge)
+    bridge.click("id:session-menu-replace-with")
+    bridge.wait("id:launcher-folder-held")
+    bridge.scroll_into_view("id:launcher-folder-held")
+
+
+def terminal_tab_close(bridge):
+    """Show the close button with its confirmation open so it remains visible when the pointer is parked."""
+    bridge.click(f"id:session-row-{{session:{OPEN_SESSION}}}")
+    bridge.wait("id:session-terminal-add")
+    request = bridge.gui.helm_request
+    path = f"/api/sessions/{bridge.session_key(OPEN_SESSION)}/tabs"
+    tab = request(bridge.run, "POST", path, {})["tab"]["id"]
+
+    def close_tab():
+        """Remove the staged shell before the next capture."""
+        bridge.press("escape")
+        request(bridge.run, "DELETE", f"{path}/{tab}")
+        bridge.wait_gone_text("Terminal 1")
+
+    try:
+        tab_target = f"id:session-terminal-tab-{tab}"
+        bridge.wait(tab_target)
+        bridge.hover(tab_target)
+        bridge.click(f"id:session-terminal-close-{tab}")
+        bridge.wait("id:prompt")
+        bridge.wait_text("Confirm close")
+    except Exception:
+        close_tab()
+        raise
+    return close_tab
+
+
+SHOTS += [
+    Shot(
+        "v0-46-0-blocked-alerts",
+        blocked_alerts,
+        ["id:ntfy-waiting", "id:ntfy-blocked", "id:ntfy-blocked-criteria"],
+        park=SETTINGS_PARK,
+        annotations=[
+            Callout("id:ntfy-blocked", "Turn on alerts when an agent says it cannot finish what you asked.",
+                    side="right"),
+        ],
+    ),
+    Shot(
+        "v0-46-0-bulk-restart-replace",
+        restart_replace_bar,
+        ["id:session-marked-bar", *[f"id:session-item-{{session:{title}}}" for title in STOPPED_SESSIONS]],
+        annotations=[
+            Callout("id:session-marked-start", "Resume the marked sessions that can restart and replace the others.",
+                    side="bottom", dx=245, dy=34),
+        ],
+    ),
+    Shot(
+        "v0-46-0-right-click-session",
+        right_click_session,
+        [f"id:session-item-{{session:{LOOSE_SESSION}}}", "id:session-menu"],
+        annotations=[
+            Callout(f"id:session-row-{{session:{LOOSE_SESSION}}}", "Right-click a session to open its actions here.",
+                    side="top"),
+        ],
+    ),
+    Shot(
+        "v0-46-0-replace-with-destination",
+        replace_held_destination,
+        ["id:launcher-destination-heading", "id:launcher-host-row", "id:launcher-folder-held"],
+        park=LAUNCHER_PARK,
+        annotations=[
+            Callout("id:launcher-folder-held", "Replace with keeps this host and directory.", side="bottom", dy=15),
+        ],
+    ),
+    Shot(
+        "v0-46-0-terminal-tab-close",
+        terminal_tab_close,
+        ["id:session-terminal-tabs", "id:session-terminal-add", "id:prompt"],
+        annotations=[
+            Callout("id:session-terminal-add",
+                    "New terminal stays on the right. Hover a shell tab to see its close button on the left.",
+                    side="bottom"),
         ],
     ),
 ]
