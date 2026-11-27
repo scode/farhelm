@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-style-whats-new`](reports/launcher-style-whats-new.report.md) landed 2026-11-26 in #5004, #5008: Give What's new the session launcher's look, every entry in full, with release curation marking each highlight's headline
 - [`supervisor-stop-and-restart-cleanup-fixes`](reports/supervisor-stop-and-restart-cleanup-fixes.report.md) landed 2026-11-26 in #5005: Settle unconfirmed agent starts before Stop reports success and keep failed Restart cleanup retryable after session deletion
 - [`golden-harness-and-new-container-scene`](reports/golden-harness-and-new-container-scene.report.md) landed 2026-11-26 in #5011, #5014: Report missing renders on the portable golden changes page and show the settled build status in the New container golden
 - [`welcome-empty-state`](reports/welcome-empty-state.report.md) landed 2026-11-26 in #5012, #5018: Replace the startup Welcome card with a welcome in the empty main area, shown whenever there are no sessions
