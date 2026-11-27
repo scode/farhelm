@@ -1741,15 +1741,13 @@ Where the port does not match the old app, and why. Each stays until the work na
   the two apart by the status alone, and the helm answers any cleanup failure of its timeout kind with a 504 too, so
   such a failure inside the bound also closes the editor; the row then shows the helm's own words for that failure while
   the recipe stays listed.
-- **A close during a save waits for it in Settings; in Add host the leave question offers Keep editing and Save, and no
-  Discard.** The old question, asked by a close during a save, drew all three answers and disabled every one until the
-  save ended. Settings now asks nothing while the save is out and waits for its answer (SPEC.md, "Settings"): a done
-  save lets the close go on, and a refused one keeps Settings open on the editor with the helm's words. Add host's
-  embedded editor still asks. The prompt cannot disable one answer, and a Discard could not keep its word, since the
-  draft on screen is the one being saved. Keep editing and the question's Save stay usable: Save waits for the save
-  already out. As in the old editor, that save's done answer finishes the close even while the question is unanswered. A
-  refused save takes the open question away, so the ordinary answers return under the helm's words; the old question
-  came back with all three answers.
+- **A close during a save waits for it.** The old question, asked by a close during a save, drew all three answers and
+  disabled every one until the save ended. Settings now asks nothing while the save is out and waits for its answer
+  (SPEC.md, "Settings"): a done save lets the close go on, and a refused one keeps Settings open on the editor with the
+  helm's words. Add host's embedded editor goes a different way: a close of Add host during its save stays and asks
+  nothing, as Add host already did while it was busy, and is then dropped, so a done save returns to the form with Add
+  host still open (`a_close_while_the_recipe_save_is_out_stays_and_asks_nothing`). Either way the leave question is
+  never asked over a save and always offers Keep editing, Discard and Save.
 - **A close while a delete is out closes at once.** The old editor asked the leave question then, with every answer
   disabled, and dropped the close once the delete succeeded. Here Settings closes without asking: the recipe is going,
   and the delete goes on in the operation store, its refusal, if any, shown under the recipe's row.
@@ -1828,25 +1826,17 @@ Where the port does not match the old app, and why. Each stays until the work na
   while any other Settings save holds the preference row's key) sends nothing and says so under the switch, as every
   other Settings switch does. It still shows only the stored choice throughout, as before, so nothing on screen changes
   between the press and the helm's answer, which the embedded helm gives in milliseconds.
-- **A refused Create SSH key reads the account again: when it is answered, a few times over the next half minute, and
-  once more the next time Tensorlake is shown.** The old section read nothing after a failed create, and its request
-  waited for `ssh-keygen` however long that took, so the key showed where the user pressed. Here the helm answers within
-  its 20-second bound and lets a generation still running carry on, saying the key shows once it exists, while the
-  account is read once per opening and not pushed, and nothing pushed changes when the key is written. So after a
-  refusal the section reads the account at once, then again 5, 15 and 30 seconds later while no key shows, and once more
-  on the next showing; the helm's own bounds end a generation about 10 seconds after the refusal, so the key appears
-  within seconds of being written for a user who stays on Tensorlake
-  (`a_carried_on_create_shows_the_key_where_it_was_pressed`,
-  `a_refused_create_reads_the_account_now_and_on_the_next_showing`). The re-reads stop once the key shows, after the
-  last one (`the_re_reads_after_a_carried_on_create_end_after_half_a_minute`), and when Settings closes
-  (`closing_settings_stops_the_re_reads`); they go on while another section is shown. A re-read that fails shows Retry
-  loading in the API key forms, as any failed account read does. A refusal's line goes once a read shows the key. Once
-  the re-reads are over and the account still shows no key, a line under the refusal says "No key has appeared since.
-  Press Create SSH key to try again.", since the refusal's promise no longer holds when the generation failed after the
-  reply; the old section had no such line (`re_reads_that_find_no_key_say_to_try_again`). It shows from the moment the
-  last re-read is sent, a round trip before its answer, and is hidden while the account's last read failed, which
-  learned nothing about the key (`a_failed_last_re_read_says_nothing_about_the_key`); a new press cancels the earlier
-  refusal's re-reads (`a_second_press_cancels_the_first_refusals_re_reads`).
+- **A refused Create SSH key reads the account once and tells the user to select Create SSH key again.** The old section
+  read nothing after a failed create, and its request waited for `ssh-keygen` however long that took, so the key showed
+  where the user pressed. Here the helm answers within its 20-second bound and lets a generation still running carry on,
+  and its 504 says to select Create SSH key again in a few seconds, which waits for that generation and answers its key.
+  The section reads the account once after a refusal, in case the key is already there, and does not poll for it
+  (SPEC.md, "Settings": the helm is a presumed low-latency remote, and nothing is added so someone can move on before a
+  round trip settles). Once that read has answered with no key, a line under the refusal says "No key has appeared
+  since. Press Create SSH key to try again."; the old section had no such line. It is hidden while the account's last
+  read failed, which learned nothing about the key. A refusal's line goes once a read or a second create shows the key
+  (`a_refused_create_reads_the_account_once_and_a_second_create_shows_the_key`,
+  `a_failed_read_after_a_refused_create_says_nothing_about_the_key`).
 - **Sandboxes not on this helm reads only when its answer can change.** The old list read on every fleet notice while
   healthy, and again after a successful Test while failed. Here it reads when the section first knows a key is saved, on
   Refresh, after a key's Save or Clear in this opening, after every answer to a Delete, and when the pushed hosts list

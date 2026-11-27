@@ -118,6 +118,11 @@ pub(super) struct TensorlakeAccount {
     /// read with the old one wrong even while a key stays saved, so the list of Sandboxes not on this helm reads again
     /// when this moves ([`super::tensorlake_sandboxes`]).
     key_saves: u64,
+    /// How many answers the account has had in this opening: a read's, done or failed, or a done save's. The SSH key
+    /// group tells an answer that came after a refused Create SSH key from earlier ones by it
+    /// ([`super::tensorlake_ssh_key`]); the UI channel answers in the order it sends, so any later answer says what the
+    /// helm stores now.
+    answers: u64,
 }
 
 impl TensorlakeAccount {
@@ -128,7 +133,13 @@ impl TensorlakeAccount {
             settings: None,
             unreadable: None,
             key_saves: 0,
+            answers: 0,
         }
+    }
+
+    /// How many answers the account has had in this opening (see the field).
+    pub(super) fn answers(&self) -> u64 {
+        self.answers
     }
 
     /// The helm's settings as last answered; `None` until the read answers, while it keeps failing, and after a key
@@ -175,6 +186,7 @@ impl TensorlakeAccount {
 
     /// The helm said what it stores: after the read, or as a done Save's or Clear's answer.
     fn answered(&mut self, answer: Result<Settings, HostText>, cx: &mut Context<Self>) {
+        self.answers += 1;
         match answer {
             Ok(settings) => {
                 self.settings = Some(settings);

@@ -19,9 +19,9 @@
 //!   choices the user did not touch included.
 //! - **Save is the recipe's own work.** It checks a new name and the whole draft first, with the helm's shared rules,
 //!   and says why it sent nothing; otherwise it creates (`POST /api/tensorlake/recipes`) or updates (`PUT
-//!   /api/tensorlake/recipes/<name>`) through the operation store under [`OpKey::recipe`], the key the row's build uses,
-//!   with every field read-only and Back and Cancel unavailable meanwhile, as in the old editor. A done save closes the
-//!   editor, or finishes the leave whose question it answered or still asks; the list already shows the change, which
+//!   /api/tensorlake/recipes/<name>`) through the operation store under [`OpKey::recipe`], the key the row's build
+//!   uses, with every field read-only and Back and Cancel unavailable meanwhile, as in the old editor. A done save
+//!   closes the editor, or finishes the leave whose question's Save sent it; the list already shows the change, which
 //!   the helm pushed before it answered. A refused one keeps the draft with the helm's words, shown while the draft is
 //!   as it was sent, so the next edit drops them as the old `oninput` did.
 //! - **A refusal shown here leaves the key.** The key's one refusal record is what the row draws under its build
@@ -61,7 +61,6 @@ use crate::components::{
 use crate::environment_ui;
 use crate::focus::Mark;
 use crate::host_text::HostText;
-use crate::layers::LayerId;
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::Inline;
 use crate::session;
@@ -289,10 +288,7 @@ pub(crate) struct Editor {
     pub(in crate::settings) save_receipt: crate::settings::editing::SaveReceipt,
     /// Whether this editor's Delete is out.
     deleting: bool,
-    /// The leave question's layer and destination. A save settling while the question is open needs to finish
-    /// that departure or close the question so the refusal is visible.
-    leave_question: Option<(Departure, LayerId)>,
-    /// The host window, needed to check or close a leave layer when an asynchronous save settles.
+    /// The host window, for a Delete's answer, which arrives with no window at hand ([`leaving`]).
     window: AnyWindowHandle,
     /// The delete confirmation, while it is up in the answers' place, frozen on the recipe's name.
     delete_question: Option<Inline<String>>,
@@ -361,7 +357,6 @@ impl Editor {
             saving: false,
             save_receipt: crate::settings::editing::SaveReceipt::default(),
             deleting: false,
-            leave_question: None,
             window: window.window_handle(),
             delete_question: None,
             leaving: None,
@@ -576,12 +571,9 @@ impl Editor {
                     .update(cx, |editor, cx| {
                         editor.set_saving(false, cx);
                         editor.save_receipt.finish(false, cx);
-                        // A refused save keeps the editor open, so a leave its question asked for does not happen. A
-                        // question still open was asked while the save was out, without Discard; it goes, and the
-                        // ordinary answers come back under the helm's words, as after any refused leave.
+                        // A refused save keeps the editor open, so a leave its question asked for does not happen.
                         editor.leaving = None;
                         editor.error = Some((refusal, sent));
-                        editor.dismiss_refused_leave(cx);
                         cx.notify();
                     })
                     .is_ok();

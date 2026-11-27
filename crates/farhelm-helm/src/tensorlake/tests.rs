@@ -1697,7 +1697,9 @@ async fn stalled_create(keygen: &Arc<StalledKeygen>) -> crate::rest_harness::Har
     );
     assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
     assert!(
-        body.contains("its creation carries on, and Settings shows the key once it exists"),
+        body.contains(
+            "its creation carries on. Select Create SSH key again in a few seconds to show the key"
+        ),
         "{body}"
     );
     crate::rest_harness::assert_answered_at_reply_bound(waited, "the create");

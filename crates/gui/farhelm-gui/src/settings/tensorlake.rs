@@ -140,13 +140,6 @@ impl Tensorlake {
         }
     }
 
-    /// Settings shows the section again in this opening: the SSH key group may read the account again
-    /// ([`SshKey::shown_again`]).
-    pub(super) fn shown_again(&mut self, cx: &mut Context<Self>) {
-        self.ssh_key
-            .update(cx, |ssh_key, cx| ssh_key.shown_again(cx));
-    }
-
     /// The section's key form, whose masked field can take focus from a search result.
     pub(super) fn key(&self) -> Entity<TensorlakeKey> {
         self.key.clone()

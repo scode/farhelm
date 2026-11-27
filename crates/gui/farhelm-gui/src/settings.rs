@@ -976,8 +976,8 @@ impl SettingsDialog {
     /// which reads the leftovers and asks the helm to check every container host. Showing Credentials makes it the
     /// first time, which reads the Tensorlake account too if no section has yet, and reads its catalog every time;
     /// showing Tensorlake makes it the first time, over the same account, read then if no section has yet and not
-    /// again, as the old account was read once per opening, except once after a refused Create SSH key
-    /// ([`tensorlake_ssh_key`]); showing Recipes makes it the first time, over the same account, read then if no
+    /// again, as the old account was read once per opening (a refused Create SSH key reads it once more right away,
+    /// [`tensorlake_ssh_key`]); showing Recipes makes it the first time, over the same account, read then if no
     /// section has yet.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_on = None;
@@ -1018,24 +1018,17 @@ impl SettingsDialog {
                 }
             }
         }
-        if section == Section::Tensorlake {
-            match &self.tensorlake_section {
-                // Shown again: the SSH key group reads the account again if a refused Create SSH key asked it to.
-                Some(shown) => shown.update(cx, |shown, cx| shown.shown_again(cx)),
-                None => {
-                    let account = self
-                        .tensorlake
-                        .get_or_insert_with(|| cx.new(TensorlakeAccount::new))
-                        .clone();
-                    let key = cx.new(|cx| {
-                        TensorlakeKey::new(account.clone(), Place::Tensorlake, window, cx)
-                    });
-                    let view = cx.new(|cx| tensorlake::Tensorlake::new(account, key, window, cx));
-                    cx.observe(&view, |dialog, _, cx| dialog.finish_handover(cx))
-                        .detach();
-                    self.tensorlake_section = Some(view);
-                }
-            }
+        if section == Section::Tensorlake && self.tensorlake_section.is_none() {
+            let account = self
+                .tensorlake
+                .get_or_insert_with(|| cx.new(TensorlakeAccount::new))
+                .clone();
+            let key =
+                cx.new(|cx| TensorlakeKey::new(account.clone(), Place::Tensorlake, window, cx));
+            let view = cx.new(|cx| tensorlake::Tensorlake::new(account, key, window, cx));
+            cx.observe(&view, |dialog, _, cx| dialog.finish_handover(cx))
+                .detach();
+            self.tensorlake_section = Some(view);
         }
         if section == Section::Recipes {
             if self.recipes.is_none() {
@@ -1044,8 +1037,7 @@ impl SettingsDialog {
                     .tensorlake
                     .get_or_insert_with(|| cx.new(TensorlakeAccount::new))
                     .clone();
-                let layer = self.layer;
-                self.recipes = Some(cx.new(|cx| recipes::Recipes::new(layer, account, window, cx)));
+                self.recipes = Some(cx.new(|cx| recipes::Recipes::new(account, window, cx)));
             }
         } else if let Some(recipes) = &self.recipes {
             // Undrawn from now on: it must not keep holding the running pulse ([`recipes::Recipes::hidden`]).

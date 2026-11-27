@@ -18,16 +18,13 @@
 //! - **Save finishes the leave.** Save in the question saves as Save does, and the done answer completes the departure
 //!   it was asked for; a refused save keeps the editor open with the helm's words, as any refused save does. Discard
 //!   leaves at once. The question goes when it is answered, so a refused save shows the ordinary answers again under
-//!   its words. A question asked during a save is also removed if that save is refused, so the user can retry from
-//!   the ordinary Save button.
-//! - **A close is asked about even while a save is out.** Back and Cancel are unavailable while a save or a delete is
-//!   out, as in the old editor. A close still asks about unsaved changes then, as the old one did so that a close
-//!   never silently waited or dropped the draft. The question then offers Keep editing and Save only: the draft on
-//!   screen is the one being saved, so a Discard could not keep its word, and the prompt cannot disable one answer
-//!   (the old one disabled every answer until the save ended). Save waits for the save already out, and that save's
-//!   done answer finishes the close even while the question is still unanswered, as the old pending close did. A
-//!   close while a delete is out closes at once: the recipe is going, and the delete goes on as a save does. Both are
-//!   recorded in `docs/gpui/parity/settings-and-hosts.md`, "Deviations".
+//!   its words.
+//! - **Nothing leaves while a save is out.** Back and Cancel are unavailable while a save or a delete is out, as in the
+//!   old editor, and a close of Add host during a save stays and asks nothing (SPEC.md, "Settings": waiting for the
+//!   helm's round trip is accepted), as Add host's own dismissal does while it is busy. So the question is never asked
+//!   over a save already out, and always offers Keep editing, Discard and Save. A close while a delete is out closes at
+//!   once: the recipe is going, and the delete goes on as a save does. Both are recorded in
+//!   `docs/gpui/parity/settings-and-hosts.md`, "Deviations".
 //! - **Delete is the recipe's own work.** `DELETE /api/tensorlake/recipes/<name>`, under the recipe's key, as Save. A
 //!   done answer closes the editor; the helm has pushed the recipe gone. A refusal the helm gives at once (the recipe in
 //!   use, or already being deleted) stays in the editor and leaves the key, as Save's do. A cleanup still running at the
@@ -50,8 +47,8 @@ use gpui::{App, AppContext as _, Context, Window};
 
 use super::{Editor, path};
 use crate::components::{HoverHelp, Tier};
-use crate::focus::{self, Mark};
-use crate::layers::{self, Dismissal};
+use crate::focus::Mark;
+use crate::layers::Dismissal;
 use crate::operations::{Command, HelmMarker, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
@@ -102,9 +99,13 @@ impl Editor {
         !self.deleting && self.dirty(cx)
     }
 
-    /// What the hosting dialog's dismissal hook answers for the editor (Escape and its close controls): stay and ask
-    /// the leave question when [`Editor::asks_before_leaving`], and otherwise let the dialog close.
+    /// What the hosting dialog's dismissal hook answers for the editor (Escape and its close controls): stay, asking
+    /// nothing, while a save is out; stay and ask the leave question when [`Editor::asks_before_leaving`]; and
+    /// otherwise let the dialog close.
     pub(crate) fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
+        if self.saving {
+            return Dismissal::Stay;
+        }
         if self.asks_before_leaving(cx) {
             self.ask_leave(Departure::Close, window, cx);
             return Dismissal::Stay;
@@ -133,39 +134,14 @@ impl Editor {
         }
     }
 
-    /// A save the editor sent answered done: leave as the leave question's Save asked (`leaving`), or where the leave
-    /// question still open asks to go (a close asked while the save was out), or else back to the list, for the press
-    /// at `mark` that sent it. Keep editing has closed the question by then, so it falls back to the list.
+    /// A save the editor sent answered done: leave as the leave question's Save asked (`leaving`), or else back to the
+    /// list, for the press at `mark` that sent it.
     pub(super) fn saved(&mut self, mark: &Mark, cx: &mut Context<Self>) {
-        let asked = self.leave_question.take().and_then(|(departure, layer)| {
-            self.window
-                .update(cx, |_, window, cx| layers::is_open(layer, window, cx))
-                .ok()
-                .filter(|open| *open)
-                .map(|_| (departure, *mark))
-        });
-        let (departure, mark) = self
-            .leaving
-            .take()
-            .or(asked)
-            .unwrap_or((Departure::Back, *mark));
+        let (departure, mark) = self.leaving.take().unwrap_or((Departure::Back, *mark));
         self.depart(departure, &mark, None, cx);
     }
 
-    /// Close the question asked during the now-refused save and reveal the ordinary Save button.
-    pub(super) fn dismiss_refused_leave(&mut self, cx: &mut Context<Self>) {
-        if let Some((_, layer)) = self.leave_question.take() {
-            let save = self.save_focus.clone();
-            let _ = self.window.update(cx, |_, window, cx| {
-                if layers::is_open(layer, window, cx) {
-                    layers::close(layer, window, cx);
-                    focus::focus_in_layer(&save, &Mark::take(cx), window, cx);
-                }
-            });
-        }
-    }
-
-    /// Ask over the host dialog. A save already in flight locks the draft and leaves only Keep editing and Save.
+    /// Ask over the host dialog, with Keep editing, Discard and Save: never while a save is out (the module docs).
     fn ask_leave(&mut self, departure: Departure, window: &mut Window, cx: &mut Context<Self>) {
         let mark = Mark::take(cx);
         let mut question = Question::new(
@@ -178,22 +154,20 @@ impl Editor {
             "Stay here with the unsaved changes",
             Tier::Neutral,
         ));
-        if !self.saving {
-            let discard = cx.weak_entity();
-            question = question.alternative(
-                answer(
-                    "Discard",
-                    "Discard these changes and go back",
-                    Tier::Neutral,
-                ),
-                move |departure, window, cx| {
-                    let _ = discard.update(cx, |editor, cx| {
-                        let mark = Mark::take(cx);
-                        editor.depart(departure, &mark, Some(window), cx)
-                    });
-                },
-            );
-        }
+        let discard = cx.weak_entity();
+        question = question.alternative(
+            answer(
+                "Discard",
+                "Discard these changes and go back",
+                Tier::Neutral,
+            ),
+            move |departure, window, cx| {
+                let _ = discard.update(cx, |editor, cx| {
+                    let mark = Mark::take(cx);
+                    editor.depart(departure, &mark, Some(window), cx)
+                });
+            },
+        );
         let save = cx.weak_entity();
         let layer = prompt::ask(
             question,
@@ -202,8 +176,7 @@ impl Editor {
             move |departure, _, cx| {
                 let _ = save.update(cx, |editor, cx| {
                     let mark = Mark::take(cx);
-                    // A second Save waits for the request already out.
-                    if editor.saving || editor.save(cx) {
+                    if editor.save(cx) {
                         editor.leaving = Some((departure, mark));
                     }
                 });
@@ -211,12 +184,9 @@ impl Editor {
             window,
             cx,
         );
-        // The newest question owns the decision: a departure an earlier question's Save asked for, its save still
-        // out, gives way to this one's answer (or to this one's departure while it is unanswered).
-        if let Some(layer) = layer {
-            self.leaving = None;
+        // Asking about leaving dismisses an inline delete confirmation (the module docs).
+        if layer.is_some() {
             self.delete_question = None;
-            self.leave_question = Some((departure, layer));
             cx.notify();
         }
     }
