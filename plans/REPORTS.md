@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`recipe-card-and-billed-size-fixes`](reports/recipe-card-and-billed-size-fixes.report.md) landed 2026-11-25 in #4980, #4988: Hide removed failure-only container hosts on recipe cards and bind Tensorlake launch consent to the billed size shown
 - [`drop-post-clone-claude-trust`](reports/drop-post-clone-claude-trust.report.md) landed 2026-11-25 in #4992, #4998: Move Claude workspace-trust editing from managed-checkout preparation to Claude launch while preserving archive-time removal
 - [`launcher-style-quick-dialogs`](reports/launcher-style-quick-dialogs.report.md) landed 2026-11-25 in #4975, #4985, #4991, #4997, #5001: Give the quick switcher (Cmd+K), the template list (Cmd+J) and Rename (Cmd+L) the session launcher's look, with its pieces shared as components
 - [`host-provisioning-action-fixes`](reports/host-provisioning-action-fixes.report.md) landed 2026-11-25 in #4996, #5002, #5009: Pin a confirmed Tailscale Uninstall to the verified peer and give explicit host actions priority over automatic SSH sign-in
