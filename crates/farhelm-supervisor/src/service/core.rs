@@ -21913,6 +21913,64 @@ pub(crate) mod tests {
         assert_eq!(sup.store.report_pin(id).await.unwrap(), pin);
     }
 
+    /// A conversation started through a Codex app-server keeps source `vscode` in its
+    /// transcript header, and Farhelm's admission refused that header, so such a conversation
+    /// could never be resumed. Restart's click-time check reads the header through the same
+    /// parser, so a fix that reached only one of them would let a binding through and then
+    /// refuse it at the click; this pins that both now take it.
+    /// Specified: a `SessionStart` reporting a transcript whose header source is `vscode`
+    /// (originator `codex-tui`, as a terminal Codex on the shared daemon writes it) is admitted
+    /// and offers Resume, and Restart's click-time check of that binding passes; the same
+    /// report over an `mcp` header is refused and binds nothing.
+    #[farhelm_testtrace::test]
+    async fn codex_app_server_transcripts_are_admitted_and_pass_restarts_check() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let root = crate::procs::ProcessIdentity::read(std::process::id()).unwrap();
+        // `codex_pin_report` writes a `cli` header; this rewrites it with the source under test
+        // after, never before, so the report always carries the header the test names.
+        let reported = |runtime: &str, source: &str| {
+            let report = codex_pin_report(state.path(), runtime, &[root], "SessionStart");
+            let record = serde_json::json!({"type":"session_meta", "timestamp":"2026-01-01T00:00:00Z", "payload":{
+                "id": format!("thread-{runtime}"), "session_id": runtime, "source": source,
+                "originator": "codex-tui", "cwd": state.path()
+            }});
+            std::fs::write(
+                state.path().join(format!("{runtime}.jsonl")),
+                format!("{record}\n"),
+            )
+            .expect("rewrite the header");
+            report
+        };
+
+        let id = "app-server";
+        seed_codex_row(&sup, id, None, None, 0).await;
+        sup.report_codex_conversation(id, reported("daemon", "vscode"), AgentKind::Codex, 0, None)
+            .await
+            .expect("a vscode transcript is a root conversation");
+        let ready = sup.session_snapshot(id).await.unwrap().unwrap();
+        assert_eq!(ready.restart_offer, RestartOffer::Resume);
+        sup.verify_report_only_resume(id, &ready)
+            .await
+            .expect("Restart's check takes the same header");
+
+        let id = "mcp-server";
+        seed_codex_row(&sup, id, None, None, 0).await;
+        let error = sup
+            .report_codex_conversation(id, reported("mcp", "mcp"), AgentKind::Codex, 0, None)
+            .await
+            .expect_err("an mcp transcript is not a root conversation");
+        assert_eq!(error.kind, ErrorKind::InvalidRequest, "{error:#}");
+        assert!(
+            format!("{error:#}").contains("not an attributable root conversation"),
+            "refused for its header's source: {error:#}"
+        );
+        let row = sup.store.session(id).await.unwrap().unwrap();
+        assert_eq!(row.captured_conversation, None, "nothing was bound");
+    }
+
     /// Pinning fences rivals while alive and descendants after exit, then releases
     /// for a fresh Codex outside the old chain. A Stop acknowledged without effect
     /// must not pin, even for an older row that already holds a ready conversation.
