@@ -903,7 +903,8 @@ pub(crate) fn refuse_for_host_change(key: &str, work: Work, cx: &mut App) -> boo
 }
 
 /// Whether the helm-wide **Skip session confirmations** preference is on in `collections`: the lifecycle actions then go
-/// ahead on the click, and the open session's header drops "after you confirm" from its Delete's help.
+/// ahead on the click, and the open session's header drops "after you confirm" from its Delete's help, except for a
+/// single session's Delete while it lists an open terminal tab (`delete::asks_despite_skipping`).
 pub(crate) fn skips_questions(collections: &Collections) -> bool {
     selection::preferences(collections)
         .is_some_and(|preferences| preferences.skip_session_confirmations == Some(true))

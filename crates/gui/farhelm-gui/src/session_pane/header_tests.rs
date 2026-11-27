@@ -360,6 +360,39 @@ fn each_actions_hover_help_is_the_old_headers_tooltip(cx: &mut TestAppContext) {
     );
 }
 
+/// A session's open terminal tabs make its Delete ask even with Skip session confirmations on (SPEC.md, "Lifecycle
+/// operations"), and the header's help must say so: help that promised a Delete on the click would be wrong about the
+/// one Delete the maintainer wants asked. Specified: with the preference on, for a running session with one tab, the
+/// header Delete's help keeps "after you confirm"; its click opens the question and sends nothing, and the question's
+/// Confirm sends the session's Delete.
+#[gpui::test]
+fn open_tabs_keep_the_header_delete_asking_with_questions_skipped(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 1)], true));
+    pending(&mut fake);
+    assert!(
+        cx.update(|_, cx| {
+            let store = crate::session::current_store(cx).unwrap();
+            crate::session_list::menu::skips_questions(store.read(cx).collections())
+        }),
+        "the premise: Skip session confirmations is on"
+    );
+    assert_eq!(
+        hover(cx, "session-header-delete"),
+        Some(format!(
+            "Delete: remove this session and its state, after you confirm ({DELETE_SESSION_SHORTCUT_NAME})"
+        ))
+    );
+    test_support::click(cx, "session-header-delete");
+    assert!(drawn(cx, "prompt"), "open tabs ask despite the preference");
+    assert_eq!(pending(&mut fake), [], "nothing was sent before the answer");
+    test_support::click(cx, "prompt-confirm");
+    let sent: Vec<String> = pending(&mut fake)
+        .into_iter()
+        .map(|(_, path, _)| path)
+        .collect();
+    assert_eq!(sent, ["/api/sessions/a"]);
+}
+
 // ---- Restart -------------------------------------------------------------------------------------------------------
 
 /// SPEC.md: Restart is "greyed out when the session cannot resume its conversation; their tooltips and accessible
@@ -2521,6 +2554,17 @@ impl RealPane {
             .unwrap();
     }
 
+    /// Press Enter where focus is, as the keyboard would: on an open question's Confirm, which is where a question's
+    /// focus starts, it confirms. Reports whether a binding or the focused control took the key.
+    fn enter(&mut self) -> bool {
+        self.cx
+            .update_window(self.window, |_, window, cx| {
+                let key = Keystroke::parse_with_os("enter", cx.platform_info().os).unwrap();
+                window.dispatch_keystroke(key, cx)
+            })
+            .unwrap()
+    }
+
     /// Press Tab: dispatch the action Tab is bound to from wherever focus is.
     fn tab(&mut self) {
         self.cx
@@ -3164,8 +3208,9 @@ fn a_running_delete_draws_the_strip_beside_a_pill_without_its_floor() {
 /// strip and let the pill spill out of it over the Delete's progress.
 ///
 /// Spec: in a 650-pixel pane with **Skip session confirmations** on, for a remote session listing fifteen shell tabs,
-/// once the terminal lists one tunnel to a very long host name and the header's Delete is sent and left unanswered, the
-/// pill is at least 154 pixels wide and ends left of the Delete's progress.
+/// once the terminal lists one tunnel to a very long host name and the header's Delete is confirmed (open tabs ask even
+/// with the switch on), sent and left unanswered, the pill is at least 154 pixels wide and ends left of the Delete's
+/// progress.
 #[test]
 fn a_running_delete_in_a_narrow_pane_keeps_the_pill_whole_beside_many_tabs() {
     let mut snapshot = remote_session_skipping(true);
@@ -3180,6 +3225,23 @@ fn a_running_delete_in_a_narrow_pane_keeps_the_pill_whole_beside_many_tabs() {
     pane.open_tunnel(&long_host());
     pane.draw();
     pane.header_action(Action::Delete);
+    let asked = pane.draw();
+    assert!(
+        asked
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some("prompt-confirm")),
+        "the premise: Delete of a session with open tabs asks"
+    );
+    assert!(pane.enter(), "Enter on the question's Confirm confirms it");
+    let sent: Vec<String> = pending(&mut pane.fake)
+        .into_iter()
+        .map(|(_, path, _)| path)
+        .collect();
+    assert_eq!(
+        sent,
+        ["/api/sessions/a"],
+        "Enter confirmed the Delete, which is left unanswered"
+    );
     let nodes = pane.draw();
     let progress = only_node(&nodes, "session-header-delete-progress-a").bounds;
     let pill = only_node(&nodes, "session-tunnel-pill").bounds;

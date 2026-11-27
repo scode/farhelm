@@ -130,7 +130,9 @@ keyboard, including Rename and the quick switcher.
 To stop, delete, replace, restart and close shell tabs on the first click, turn on **Skip session confirmations** in
 the **Sessions** section of **Settings**, behind the gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge
 of the sidebar. It starts off, your helm keeps it, and it takes effect at once. Delete of a session in a container or sandbox, YOLO, host and
-trash questions keep their own rules, and **Restart with** still opens the launcher.
+trash questions keep their own rules, and **Restart with** still opens the launcher. Deleting a session that still has
+shell tabs open always asks first, from its row, its Delete button or the shortcut, so that one keystroke cannot close
+them all by accident; deleting several marked sessions at once does not.
 
 On an ordinary host, a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) stays while another
 session uses it; deleting its last session moves the directory, including uncommitted work, into

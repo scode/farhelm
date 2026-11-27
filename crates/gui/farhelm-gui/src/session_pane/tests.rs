@@ -1032,6 +1032,69 @@ fn the_delete_shortcut_with_questions_skipped_deletes_the_open_session_at_once(
     assert_eq!(fleet.selected().as_deref(), Some("b"));
 }
 
+/// The exception to the case above: a session with an open terminal tab asks even with Skip session confirmations on
+/// (SPEC.md, "Lifecycle operations"). On a Mac the Delete chord, ⌘W, is the chord terminal emulators close a tab with,
+/// so it is the one most easily pressed by accident. Specified: with Skip on (asserted as the premise), a's agent
+/// terminal live and focused and a listing one shell tab, the chord opens the Delete question, sends no Delete and
+/// reaches the program with nothing; with focus on the question's Confirm, Enter then sends a's Delete.
+#[gpui::test]
+fn the_delete_shortcut_asks_with_questions_skipped_while_tabs_are_open(cx: &mut TestAppContext) {
+    let skipping = farhelm_proto::ui_channel::Preferences {
+        visit_history: vec!["a".to_owned()],
+        skip_session_confirmations: Some(true),
+        welcome_seen: Some(true),
+        ..Default::default()
+    };
+    let mut fleet = open_main(
+        cx,
+        vec![
+            listing(&["a", "b"], &[session("a").tabs(1), session("b")]),
+            preferences_state(skipping),
+        ],
+    );
+    let agent = fleet
+        .opened
+        .borrow()
+        .iter()
+        .position(|(_, attach)| attach.session == "a" && attach.tab.is_none())
+        .expect("the premise: a's agent terminal is attached");
+    fleet.go_live(agent);
+    assert!(
+        fleet.cx.update(|_, cx| {
+            let store = crate::session::current_store(cx).unwrap();
+            crate::session_list::menu::skips_questions(store.read(cx).collections())
+        }),
+        "the premise: Skip session confirmations is on"
+    );
+    assert!(
+        terminal_focused(fleet.cx),
+        "the premise: a's agent terminal has focus"
+    );
+    fleet.deletes();
+
+    keys(fleet.cx, DELETE_SESSION_CHORD);
+    assert!(
+        fleet.cx.debug_bounds("prompt").is_some(),
+        "the question opened despite the preference"
+    );
+    assert!(
+        fleet.deletes().is_empty(),
+        "nothing was sent before the answer"
+    );
+    assert_eq!(
+        fleet.input(agent),
+        [],
+        "the chord never reached the program"
+    );
+    assert_eq!(
+        test_support::focused_id(fleet.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: the question's focus starts on Confirm"
+    );
+    keys(fleet.cx, "enter");
+    assert_eq!(fleet.deletes_and_replaces(), ["/api/sessions/a"]);
+}
+
 /// The modal half of the old `session-action-shortcuts.spec.ts` case "browser Delete chord yields to a visible modal
 /// and an ordinary text field" (the text field half is `actions_tests.rs`'s): SPEC.md, "A visible modal keeps keyboard
 /// ownership". A chord that reached the header from under a dialog would ask, or with questions skipped delete, behind

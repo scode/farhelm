@@ -25,9 +25,10 @@ The sections below follow the order in Settings.
 
 **Skip session confirmations** makes stop, delete, replace, restart and closing a shell tab act on the first click
 ([Stop, restart, and resume](/docs/using/stop-restart-resume/#stop-or-delete)); it does not change the host questions
-below, the YOLO question, or the trash's questions. **Name sessions on quick launch** offers to name a session while its
-agent starts ([Launch templates](/docs/using/launch-templates/#quick-launch)). **Color terminal frames by host** colors
-each terminal's frame to match its host's icon.
+below, the YOLO question, or the trash's questions, and deleting a session that has shell tabs open still asks. **Name
+sessions on quick launch** offers to name a session while its agent starts
+([Launch templates](/docs/using/launch-templates/#quick-launch)). **Color terminal frames by host** colors each
+terminal's frame to match its host's icon.
 
 ## Appearance
 
