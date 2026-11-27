@@ -5722,6 +5722,7 @@ impl HostActor {
             }
             let end_connection = step.end_connection;
             let alert_observations = step.alert_observations;
+            let listing_truncated = step.truncated == Some(true);
             let observed = alert_observations.is_some();
             let cache_changed = step.cache_changed;
             let discarded = step.discarded;
@@ -5762,22 +5763,29 @@ impl HostActor {
             // The publication gate may have yielded to a retarget. Hold the
             // same status read lock while consuming evidence and try-enqueueing:
             // a withdrawn connection must not alert for its former host row.
-            {
+            let still_current = {
                 let published = self.status.borrow();
-                if published
+                let current = published
                     .client
                     .as_ref()
-                    .is_some_and(|current| Arc::ptr_eq(current, &client))
-                    && let Some(observations) = alert_observations
-                {
+                    .is_some_and(|current| Arc::ptr_eq(current, &client));
+                if current && let Some(observations) = &alert_observations {
                     for title in alert_policy.observe(
-                        &observations,
+                        observations,
                         tokio::time::Instant::now(),
                         self.store.waiting_alerts_enabled(),
                     ) {
                         self.ntfy.enqueue(title, self.id);
                     }
                 }
+                current
+            };
+            // The same evidence ends blocked marks, and the same rule keeps a
+            // withdrawn connection's listing from speaking for the row. After
+            // the read lock is gone, since clearing a mark awaits the store.
+            if still_current && let Some(observations) = &alert_observations {
+                self.clear_finished_blocks(observations, listing_truncated)
+                    .await;
             }
             // AFTER the publish, so a client that re-reads on this
             // revision sees a hosts list and a session list that already
@@ -5897,6 +5905,57 @@ impl HostActor {
             },
             None,
         );
+    }
+
+    /// Clear the blocked mark of every session on this host that the listing
+    /// just read says is over: it ended, or the host no longer lists it
+    /// (SPEC.md, Status). An agent that exited, or a session deleted outside
+    /// this helm, is not blocked on anything any more.
+    ///
+    /// Only an accepted listing's fresh readings count (`observations`), the
+    /// evidence the waiting alerts take too. Absence counts only when the
+    /// listing was complete: a session past the supervisor's cap is missing
+    /// from a `truncated` listing without having gone anywhere.
+    ///
+    /// Asks the store's in-memory gate first, so the usual host, with no
+    /// blocked session, costs a scan of that small set and no database call.
+    /// Each clear leaves through `attention::clear`, the one exit for marks.
+    async fn clear_finished_blocks(
+        &self,
+        observations: &[crate::ntfy::Observation],
+        truncated: bool,
+    ) {
+        let blocked = match self.store.may_be_blocked_on(self.id).await {
+            Ok(blocked) => blocked,
+            Err(error) => {
+                warn!(error = %error, "could not tell which sessions are blocked; the next refresh tries again");
+                return;
+            }
+        };
+        if blocked.is_empty() {
+            return;
+        }
+        let listed: std::collections::HashMap<&str, &crate::ntfy::Observation> = observations
+            .iter()
+            .map(|observation| (observation.id.as_str(), observation))
+            .collect();
+        for session_id in blocked {
+            let finished = match listed.get(session_id.as_str()) {
+                Some(observation) => observation.has_ended(),
+                None => !truncated,
+            };
+            if !finished {
+                continue;
+            }
+            let key = crate::store::SessionKey::new(self.id, &session_id);
+            if let Err(error) = crate::attention::clear(&self.store, &self.events, &key).await {
+                warn!(
+                    session_id = peer_text(&session_id).as_str(),
+                    error = %error,
+                    "could not clear a finished session's blocked mark; the next refresh tries again"
+                );
+            }
+        }
     }
 
     /// Drain this host's session list and replace its cache slice, exactly

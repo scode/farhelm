@@ -221,9 +221,9 @@ fn and_list(names: &[&str]) -> String {
 }
 
 /// What the blocked switch covers, shown under it: the alert an agent asks for with `farhelm agent notify`, while the
-/// Notifications bell lists those whatever the switch says.
-pub(super) const BLOCKED_HELP: &str = "Sent when an agent runs farhelm agent notify. The Notifications bell lists \
-     these whether or not this is on.";
+/// session list shows that session as waiting whatever the switch says.
+pub(super) const BLOCKED_HELP: &str = "Sent when an agent runs farhelm agent notify. The session list shows that \
+     session as waiting whether or not this is on.";
 
 /// The criteria field's help: what it is for and what leaving it empty does.
 pub(super) const CRITERIA_HELP: &str = "Your own description of when an agent should tell you it is blocked; leave it \

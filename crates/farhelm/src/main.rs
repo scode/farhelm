@@ -242,7 +242,7 @@ enum AgentCmd {
         /// Absolute http or https URL. Use -- before a URL beginning with a hyphen.
         url: String,
     },
-    /// Tell the user this session is blocked and cannot finish what they asked: Farhelm shows it in the app's Notifications bell and, if they turned blocked alerts on, sends them an ntfy alert.
+    /// Tell the user this session is blocked and cannot finish what they asked: Farhelm lists the session as waiting for them in the app and, if they turned blocked alerts on, sends them an ntfy alert.
     Notify {
         /// One short sentence: what is blocked and why, for example "deploy: the staging credentials are missing".
         reason: String,

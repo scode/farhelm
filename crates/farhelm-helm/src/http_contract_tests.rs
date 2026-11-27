@@ -107,6 +107,7 @@ fn session_list_body() -> SessionListBody {
             // Helm-only and never serialized, so the contract has nothing to show for it.
             activity_order_hold: None,
             notifications_read_through: 3,
+            blocked: true,
         }],
         groups: vec![farhelm_proto::ui_channel::SessionGroup {
             id: 3,

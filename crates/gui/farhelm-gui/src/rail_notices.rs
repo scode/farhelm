@@ -738,22 +738,6 @@ fn entry(
             };
             return detail_entry(notice, title, detail, palette);
         }
-        // An agent's `farhelm agent notify`: the session's title and host, then its reason. The title and the reason
-        // are host-written text, isolated like the host's name. Marking the notice read resolves it.
-        NoticeContent::AgentBlocked {
-            session_title,
-            reason,
-            ..
-        } => {
-            let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{}-title", notice.id))
-                .host(&HostText::from_host(session_title.as_str()))
-                .text(" on ");
-            let title = match &host {
-                Some(host) => title.host(host),
-                None => title.text("Unknown host"),
-            };
-            return detail_entry(notice, title.text(" is blocked"), reason, palette);
-        }
     };
     let actions = Actions::of(notice, checkout_id, trash_snapshot);
     let id = notice.id;

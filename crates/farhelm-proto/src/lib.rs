@@ -929,6 +929,29 @@ impl SessionStatus {
             | SessionStatus::Unknown => false,
         }
     }
+
+    /// Whether a session with this status reads as waiting on the user once the helm's blocked mark is counted:
+    /// `blocked` is whether its agent said it is blocked (`farhelm agent notify`) and nothing has cleared that since.
+    ///
+    /// The one definition of "effective Waiting" that the helm's Activity order, its `?status=` filter and the
+    /// desktop app's waiting presentation share, so a blocked session is waiting everywhere or nowhere. A blocked
+    /// session reads as waiting whatever live or unclassified status the supervisor reports, and so never as Running
+    /// or Idle; an ended session never does, blocked or not, because an agent that has exited is no longer asking
+    /// anything (the helm clears the mark when it sees the end, and this keeps the moment before that from showing an
+    /// exited session as waiting). The raw status itself is left alone: lifecycle guards (Restart's confirmation,
+    /// prompt delivery and the like) keep reading what the supervisor reported.
+    ///
+    /// Exhaustive for the same reason as [`Self::is_live`]: a new status must decide here whether a blocked mark
+    /// makes it waiting.
+    pub fn effectively_waiting(&self, blocked: bool) -> bool {
+        match self {
+            SessionStatus::Waiting => true,
+            SessionStatus::Running | SessionStatus::Idle | SessionStatus::Unknown => blocked,
+            SessionStatus::Exited { .. }
+            | SessionStatus::Error { .. }
+            | SessionStatus::Interrupted => false,
+        }
+    }
 }
 
 /// What the supervisor did with the opt-in to install persistent conversation hooks for this run.
@@ -2050,9 +2073,9 @@ pub enum AgentVerb {
     /// but takes no session mutation fence: a pending link must not hold lifecycle work.
     OpenUrl { url: String },
     /// Tell the user the asking session is blocked: `farhelm agent notify`. Always about the asking session itself, so
-    /// it names no target and needs no approval card. The helm records it as a notice in the desktop's Notifications
-    /// bell and, when ntfy alerts and their blocked switch are on, sends an ntfy alert. Answered with
-    /// [`AgentReply::Notified`].
+    /// it names no target and needs no approval card. The helm marks the session blocked, so the session list counts it
+    /// as waiting until the user attends to it (`SessionRow::blocked`), and, when ntfy alerts and their blocked switch
+    /// are on, sends an ntfy alert. Answered with [`AgentReply::Notified`].
     Notify {
         /// Why the session is blocked, in the agent's words: what is blocked and what it needs. The helm strips
         /// characters that must not be shown as themselves, and refuses an empty one or one longer than
@@ -3157,6 +3180,33 @@ where
     D: serde::Deserializer<'de>,
 {
     Option::<i64>::deserialize(deserializer)
+}
+
+/// The body of `POST /api/sessions/{id}/attention`: evidence that the user is attending to that one session, shared by
+/// the helm that decodes it and the desktop app that sends it.
+///
+/// Its own route rather than a variant of `PUT /api/sessions/{id}/seen`, because the two signals have different
+/// senders: the seen mark is also sent for a session opened automatically or in a window that is not active, and skips
+/// muted or unchanged rows, while attention must come only from the user acting on that session in an active window.
+/// Extra fields are refused, so a body carrying something this helm does not understand is not silently treated as a
+/// bare switch or interaction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SessionAttentionRequest {
+    pub kind: SessionAttention,
+}
+
+/// What the user did that shows they are attending to a session (SPEC.md, Status).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAttention {
+    /// The user switched to the session themselves in an active window. Clears the session's blocked mark (the
+    /// agent's `farhelm agent notify`), as opening a session reads its unseen output.
+    Switch,
+    /// The user clicked or scrolled inside the session while it was already open in an active window. Counts as
+    /// attention but leaves a blocked mark alone: a stray click is weaker evidence that the user has read what the
+    /// agent is blocked on than switching to it or typing into it.
+    Interaction,
 }
 
 /// A session's active mute as stored by the helm. The client that mutes it
@@ -10516,6 +10566,58 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The attention route's two kinds do different things (only a switch clears a blocked mark), so a body must name
+    /// one exactly, and the desktop app and the helm must spell them alike. Specified: `switch` and `interaction`
+    /// decode and encode back to the same JSON; an unknown kind, a missing kind and an extra field are refused.
+    #[farhelm_testtrace::test]
+    fn session_attention_request_names_one_known_kind() {
+        for (wire, kind) in [
+            ("switch", SessionAttention::Switch),
+            ("interaction", SessionAttention::Interaction),
+        ] {
+            let json = serde_json::json!({"kind": wire});
+            let request: SessionAttentionRequest = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(request, SessionAttentionRequest { kind });
+            assert_eq!(serde_json::to_value(request).unwrap(), json);
+        }
+        for refused in [
+            serde_json::json!({"kind": "glance"}),
+            serde_json::json!({}),
+            serde_json::json!({"kind": "switch", "clear": true}),
+        ] {
+            assert!(
+                serde_json::from_value::<SessionAttentionRequest>(refused.clone()).is_err(),
+                "{refused}"
+            );
+        }
+    }
+
+    /// A blocked mark makes a live session read as waiting everywhere the helm and the app read status, so the one
+    /// definition must be exact: never Running or Idle while blocked, and never waiting once the agent has ended.
+    /// Specified: every live and unclassified status is effectively waiting exactly when blocked (Waiting always is),
+    /// and every ended status never is.
+    #[farhelm_testtrace::test]
+    fn a_blocked_mark_makes_every_live_status_waiting_and_no_ended_one() {
+        for status in [
+            SessionStatus::Running,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+        ] {
+            assert!(status.effectively_waiting(true), "{status:?}");
+            assert!(!status.effectively_waiting(false), "{status:?}");
+        }
+        assert!(SessionStatus::Waiting.effectively_waiting(false));
+        for status in [
+            SessionStatus::Exited { exit_code: Some(0) },
+            SessionStatus::Error {
+                detail: "exec failed".into(),
+            },
+            SessionStatus::Interrupted,
+        ] {
+            assert!(!status.effectively_waiting(true), "{status:?}");
+        }
     }
 
     /// The GUI and the helm share the seen route's request type, and a body that leaves its key out must never decode as

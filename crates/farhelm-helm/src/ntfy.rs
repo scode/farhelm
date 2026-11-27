@@ -113,6 +113,14 @@ pub(crate) struct Observation {
     status: SessionStatus,
 }
 
+impl Observation {
+    /// Whether the listing reported this session ended. The host refresh reads it to clear the blocked mark of an
+    /// agent that exited (`manager`'s `clear_finished_blocks`), from the same fresh readings the alerts take.
+    pub(crate) fn has_ended(&self) -> bool {
+        self.status.has_ended()
+    }
+}
+
 impl From<&SessionInfo> for Observation {
     fn from(session: &SessionInfo) -> Self {
         Self {
@@ -447,6 +455,16 @@ impl Alerts {
             kind: AlertKind::Blocked { reason },
         });
     }
+
+    /// Note that the user has just shown they are attending to `key`'s session: they switched to it, sent input to
+    /// its terminal, or interacted with it while it was open in an active window (`crate::attention`). It is the one
+    /// place that per-session evidence reaches the alerts; window focus and activity elsewhere never do (SPEC.md,
+    /// "Ntfy alerts").
+    ///
+    /// The alerts do not act on it yet: every alert still goes out as soon as its own rules allow, so this records
+    /// nothing. Its callers run it on every terminal input frame, so whatever it comes to do must stay cheap and must
+    /// not wait.
+    pub(crate) fn note_attention(&self, _key: &crate::store::SessionKey) {}
 
     /// Try-send one alert, dropping it with a warning when the queue is full or gone.
     fn send(&self, alert: Alert) {

@@ -54,7 +54,9 @@
 //! and two reads of an unchanged fleet come back identical. The activity
 //! order's leading component is itself two parts: connected Running and
 //! Waiting rows first, everything else after, with the work-start key
-//! ordering inside both groups. What changes with the sort is the sequence;
+//! ordering inside both groups. "Waiting" there, and in the status filter,
+//! counts a session whose agent said it is blocked
+//! (`SessionRow::effectively_waiting`). What changes with the sort is the sequence;
 //! nothing about WHICH rows the view holds, so neither count moves —
 //! although past the cap the sequence decides which rows survive at all.
 //! Hosts go on reporting their sessions in whatever order they like: the
@@ -194,6 +196,8 @@ struct ViewerState {
     placement: store::SessionPlacement,
     marks: NotificationMarks,
     mute: Option<store::MuteEntry>,
+    /// The agent's `farhelm agent notify` mark (`store::session_blocked`).
+    blocked: bool,
 }
 
 /// Tag one host's session with that host, for the merged list.
@@ -232,6 +236,7 @@ fn row_of(
         mute: viewer.mute.and_then(store::MuteEntry::active),
         activity_order_hold,
         stale: !host.state.is_connected(),
+        blocked: viewer.blocked,
     }
 }
 
@@ -250,6 +255,9 @@ fn creation_tail(row: &SessionRow) -> (std::cmp::Reverse<i64>, &str, HostId) {
 
 /// Whether a row belongs to the Activity order's first group: a connected
 /// Waiting report or a connected Running report whose order is free to move.
+/// Waiting is the effective status ([`SessionRow::effectively_waiting`]), so a
+/// session whose agent said it is blocked joins the group whatever the
+/// supervisor reports, as a detected question does.
 ///
 /// "Connected" is the whole of the freshness claim — `stale` is set from
 /// `HostState::is_connected` alone, so a connected host's old cached Running
@@ -259,15 +267,16 @@ fn creation_tail(row: &SessionRow) -> (std::cmp::Reverse<i64>, &str, HostId) {
 /// however new their work-start key is.
 fn is_active(row: &SessionRow) -> bool {
     !row.stale
-        && (row.info.status == SessionStatus::Waiting
+        && (row.effectively_waiting()
             || (row.info.status == SessionStatus::Running && row.activity_order_hold.is_none()))
 }
 
 /// While a mute holds the order, use the previous burst's key. A connected
-/// Waiting report breaks through in both group and key until the wait clears.
+/// Waiting report, or a connected blocked session, breaks through in both
+/// group and key until the wait or the mark clears.
 fn activity_order_key(row: &SessionRow) -> i64 {
     let live_key = row.info.effective_work_started_at();
-    if !row.stale && row.info.status == SessionStatus::Waiting {
+    if !row.stale && row.effectively_waiting() {
         live_key
     } else {
         row.activity_order_hold.unwrap_or(live_key)
@@ -338,7 +347,7 @@ fn assemble(
     let total = view.len() as u64;
     let mut sessions: Vec<SessionRow> = view
         .into_iter()
-        .filter(|row| filter.matches(row.host, &row.info))
+        .filter(|row| filter.matches(row.host, &row.info, row.blocked))
         .collect();
     let matching = (!filter.is_empty()).then_some(sessions.len() as u64);
     sort_rows(&mut sessions, sort);
@@ -491,11 +500,15 @@ async fn session_list_staged(
     let groups = store.session_group_projection(&seen_ids).await?;
     // The notification marks, joined the same way and for the same reason.
     let notification_marks = store.notification_marks(&seen_ids).await?;
+    // And the blocked marks, from the table rather than the store's in-memory
+    // gate, so the listing shows exactly what is stored.
+    let blocked = store.blocked_sessions(&seen_ids).await?;
     let viewer_state = |key: &store::SessionKey| ViewerState {
         seen_activity_at: seen_activity.get(key).copied(),
         placement: groups.placements.get(key).copied().unwrap_or_default(),
         marks: notification_marks.get(key).copied().unwrap_or_default(),
         mute: mutes.get(key).copied(),
+        blocked: blocked.contains(key),
     };
     for cached in slice.rows {
         let Some(host) = by_id.get(&cached.host) else {
@@ -600,6 +613,7 @@ mod tests {
             activity_order_hold: None,
             notifications_read_through: 0,
             stale: false,
+            blocked: false,
         }
     }
 
@@ -706,6 +720,57 @@ mod tests {
         );
         muted.stale = true;
         assert_eq!(order([muted, idle, running]), ["running", "idle", "muted"]);
+    }
+
+    /// A session whose agent said it is blocked needs the user exactly as a detected question does, so it must rise
+    /// into the active group and break through a mute's order hold the same way, and only while its host is
+    /// connected. Specified: an Idle row that is muted and blocked sorts above a Running row on its live key; the same
+    /// row unblocked sorts below an Idle row with a newer key, on its held key; blocked but stale, it sorts with the
+    /// inactive rows on its held key; and a blocked row that has ended is not active.
+    #[farhelm_testtrace::test]
+    fn a_blocked_row_sorts_as_waiting_and_breaks_through_a_mute() {
+        let mut blocked = row("blocked", 100, 1);
+        blocked.info.status = SessionStatus::Idle;
+        blocked.info.last_work_started_at = 700_000;
+        blocked.activity_order_hold = Some(200_000);
+        blocked.blocked = true;
+        let mut idle = row("idle", 400, 1);
+        idle.info.status = SessionStatus::Idle;
+        idle.info.last_work_started_at = 300_000;
+        let mut running = row("running", 600, 1);
+        running.info.status = SessionStatus::Running;
+        running.info.last_work_started_at = 500_000;
+
+        let order = |rows: [&SessionRow; 3]| {
+            let mut rows = rows.map(SessionRow::clone);
+            sort_rows(&mut rows, store::ListSort::Activity);
+            rows.map(|row| row.info.id)
+        };
+        assert_eq!(
+            order([&idle, &running, &blocked]),
+            ["blocked", "running", "idle"],
+            "blocked joins the active group on its live key, ahead of the older running burst"
+        );
+        let mut unblocked = blocked.clone();
+        unblocked.blocked = false;
+        assert_eq!(
+            order([&idle, &running, &unblocked]),
+            ["running", "idle", "blocked"],
+            "without the mark the mute's held key and group apply again"
+        );
+        let mut stale = blocked.clone();
+        stale.stale = true;
+        assert_eq!(
+            order([&idle, &running, &stale]),
+            ["running", "idle", "blocked"],
+            "a blocked report from an unreachable host is last-known, not a live request"
+        );
+        let mut ended = blocked;
+        ended.info.status = SessionStatus::Exited { exit_code: Some(0) };
+        assert!(
+            !is_active(&ended),
+            "an ended session asks nothing, blocked or not"
+        );
     }
 
     /// The activity order moves for two reasons only: a later burst key, or a
@@ -1107,6 +1172,27 @@ mod tests {
         );
         assert_eq!(filtered.matching, Some(1));
         assert_eq!(ids(&filtered.sessions), ["keep"]);
+    }
+
+    /// The merged view hands each row's blocked mark to the filter, or the Waiting filter would miss the sessions
+    /// whose agents said they are blocked while still listing them under Running. Specified: of a blocked Running row
+    /// and an unblocked Running row, `?status=waiting` returns only the blocked one and `?status=running` only the
+    /// other, against an unchanged total.
+    #[farhelm_testtrace::test]
+    fn the_status_filter_sees_each_rows_blocked_mark() {
+        let mut blocked = row("blocked", 200, 1);
+        blocked.blocked = true;
+        let view = vec![blocked, row("running", 100, 1)];
+        for (word, expected) in [("waiting", "blocked"), ("running", "running")] {
+            let body = assemble(
+                view.clone(),
+                &store::SessionFilter::default().status(word),
+                store::ListSort::Created,
+                false,
+            );
+            assert_eq!(ids(&body.sessions), [expected], "{word}");
+            assert_eq!((body.matching, body.total), (Some(1), 2), "{word}");
+        }
     }
 
     /// The default view is unfiltered and therefore makes no matching claim.

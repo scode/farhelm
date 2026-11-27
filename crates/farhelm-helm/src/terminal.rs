@@ -269,22 +269,28 @@ fn resolve_attach_request(q: &TermQuery) -> anyhow::Result<(TerminalSelector, &s
 ///
 /// The client is returned alongside the attachment because `serve_term`
 /// must keep talking to the SAME connection for the socket's whole life —
-/// input, resize, detach. The resolved bare ID travels with it,
-/// because later resize messages must never send the public full reference.
+/// input, resize, detach. The resolved key travels with it, because later
+/// resize messages must never send the public full reference, and the
+/// attention hook names the session by its entry and bare ID.
 /// Re-routing per message would let a mid-session reconnect silently move a live
 /// terminal's writes to a different connection than the one its attachment lives on.
 async fn attach_from_query(
     state: &AppState,
     session_id: &str,
     q: &TermQuery,
-) -> anyhow::Result<(Arc<SupervisorClient>, String, u32, TermStream)> {
+) -> anyhow::Result<(
+    Arc<SupervisorClient>,
+    crate::store::SessionKey,
+    u32,
+    TermStream,
+)> {
     let (terminal, lease) = resolve_attach_request(q)?;
     let key = resolve_session_ref(state, session_id).await?;
     let (_claim, client) = route_active_session(state, &key).await?;
     let (channel, stream) = client
         .attach_terminal(&key.session_id, q.cols, q.rows, terminal, lease)
         .await?;
-    Ok((client, key.session_id, channel, stream))
+    Ok((client, key, channel, stream))
 }
 
 /// Whether this failure says the TAB being attached does not exist, which
@@ -469,10 +475,13 @@ const TEST_PANIC_TEXT_MESSAGE: &str = r#"{"type":"panic"}"#;
 /// Pump one attached terminal between the client and the supervisor.
 ///
 /// The body of the terminal path, and deliberately the dumbest part of it:
-/// frames are never inspected, buffered, or transformed in either
-/// direction. Everything a client draws comes from the supervisor's grid
-/// messages, and every input message reaches it unedited — that is what "full fidelity" in SPEC.md
-/// costs here, and any parsing added at this layer would break it.
+/// frames are never buffered or transformed in either direction. Everything
+/// a client draws comes from the supervisor's grid messages, and every input
+/// message reaches it unedited — that is what "full fidelity" in SPEC.md
+/// costs here, and any rewriting added at this layer would break it. The one
+/// look at a frame is the attention hook's (`crate::attention::terminal_input`),
+/// which reads an input message's kind after forwarding it, to tell the
+/// user's input from the app's focus reports and pointer motion.
 ///
 /// The socket always outlives its attachment by exactly one message: when
 /// the supervisor ends the attachment (takeover, dead terminal), the
@@ -515,20 +524,19 @@ async fn serve_term(
     // `attach_from_query`'s own docs for why folding them into one
     // `Result` is what keeps this a single arm instead of two copies of
     // the same three lines.
-    let (client, bare_session_id, channel, mut events) =
-        match attach_from_query(&state, &session_id, &q).await {
-            Ok(parts) => parts,
-            Err(e) => {
-                let notice = refused_attach_notice(&e, &q);
-                // Bound this notice because a peer that cannot accept a
-                // hundred-byte notice within the grace period is one the
-                // reason would never have reached anyway.
-                let _ =
-                    tokio::time::timeout(WS_TEARDOWN_GRACE, socket.send(control_frame(&notice)))
-                        .await;
-                return Err(e);
-            }
-        };
+    let (client, key, channel, mut events) = match attach_from_query(&state, &session_id, &q).await
+    {
+        Ok(parts) => parts,
+        Err(e) => {
+            let notice = refused_attach_notice(&e, &q);
+            // Bound this notice because a peer that cannot accept a
+            // hundred-byte notice within the grace period is one the
+            // reason would never have reached anyway.
+            let _ =
+                tokio::time::timeout(WS_TEARDOWN_GRACE, socket.send(control_frame(&notice))).await;
+            return Err(e);
+        }
+    };
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -636,7 +644,8 @@ async fn serve_term(
 
     let client_inbound = Arc::clone(&client);
     // Resizes belong to this attachment's original connection and bare wire ID.
-    let session_id_inbound = bare_session_id;
+    let session_id_inbound = key.session_id.clone();
+    let state_inbound = Arc::clone(&state);
     let inbound = tokio::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
             match msg {
@@ -653,6 +662,13 @@ async fn serve_term(
                     {
                         break;
                     }
+                    // Input that reached the session is the user attending to
+                    // it: it clears the agent's blocked mark (SPEC.md, Status).
+                    // A tab's input counts too, since a tab is part of the
+                    // session. Peeking at the frame leaves what the supervisor
+                    // received untouched, and the hook never waits, so it
+                    // cannot hold up the keystrokes queued behind this one.
+                    crate::attention::terminal_input(&state_inbound, &key, &bytes);
                 }
                 #[cfg(test)]
                 Ok(ws::Message::Text(text)) if text.as_str() == TEST_PANIC_TEXT_MESSAGE => {

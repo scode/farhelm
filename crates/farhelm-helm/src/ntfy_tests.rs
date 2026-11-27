@@ -1237,3 +1237,72 @@ async fn manager_observations_settle_without_flicker_or_unknown_alerts() {
         assert_eq!(server.received.lock().unwrap().len(), 1);
     }
 }
+
+/// The blocked alert is the one place the user reads which session `farhelm agent notify` came from, so it must name
+/// the session by the title they know it by, and a session the helm has not listed yet (one that has only just
+/// started) must still be named somehow. Specified: with blocked alerts on, a Notify from the listed session
+/// `local-live` titled "Build console" sends "Build console on this machine is blocked: <reason>", and one from
+/// `never-listed`, which the helm has not cached, sends "never-listed on this machine is blocked: <reason>".
+#[farhelm_testtrace::test]
+async fn a_blocked_alert_names_the_session_by_its_cached_title_or_else_its_id() {
+    use crate::agent_requests::{AgentOrigin, AgentRequestHandler, HelmAgentRequests};
+    use farhelm_proto::{AgentOutcome, AgentVerb};
+
+    let mut server = stand_in(Answer::Success).await;
+    let harness = FleetBuilder::new()
+        .await
+        .ntfy_client(client())
+        .local(HostScript {
+            identity: Some("identity-local".to_string()),
+            sessions: vec![SessionInfo {
+                title: "Build console".into(),
+                ..session("local-live", 30)
+            }],
+            ..HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let host = crate::rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(host).await;
+    harness
+        .store
+        .save_ntfy_config(save(&server.server_url, Some(TOKEN), true))
+        .await
+        .ok()
+        .unwrap();
+    let connection = harness
+        .manager
+        .status(host)
+        .and_then(|status| status.client)
+        .expect("the premise: the local host is connected")
+        .connection_id();
+    let handler: std::sync::Arc<dyn AgentRequestHandler> =
+        HelmAgentRequests::for_state(&harness.state);
+    for session_id in ["local-live", "never-listed"] {
+        let outcome = handler
+            .handle(
+                AgentOrigin { host, connection },
+                session_id,
+                AgentVerb::Notify {
+                    reason: "deploy: no credentials".into(),
+                },
+            )
+            .await;
+        assert!(matches!(outcome, AgentOutcome::Ok { .. }), "{outcome:?}");
+    }
+    server.arrived(2).await;
+    assert_eq!(
+        server
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.body.clone())
+            .collect::<Vec<_>>(),
+        [
+            "Build console on this machine is blocked: deploy: no credentials",
+            "never-listed on this machine is blocked: deploy: no credentials",
+        ]
+    );
+}

@@ -3056,13 +3056,16 @@ pub(crate) async fn do_stop_session(
             "the target host's connection changed while this Stop waited for approval. Nothing was stopped. Ask again to approve its current state.".into(),
         )));
     }
-    client
+    let outcome = client
         .stop_session_guarded(
             &key.session_id,
             refuse_if_tabs_open,
             refuse_if_agent_running,
         )
-        .await
+        .await?;
+    // A stopped agent is no longer blocked on anything (SPEC.md, Status).
+    crate::attention::clear_blocked(state, key).await;
+    Ok(outcome)
 }
 
 /// `POST /api/sessions/{id}/stop` — return Stop's partial-cleanup notice,
@@ -3226,6 +3229,15 @@ pub(crate) async fn get_session(
         Ok(map) => map.get(&key).copied().unwrap_or_default(),
         Err(e) => return http_error(e),
     };
+    // And the blocked mark, from the table as the listing reads it.
+    let blocked = match state
+        .store
+        .blocked_sessions(std::slice::from_ref(&key))
+        .await
+    {
+        Ok(blocked) => blocked.contains(&key),
+        Err(e) => return http_error(e),
+    };
 
     // The client comes from the SAME status read that resolved the owner,
     // so "ask the host" and "say this row is live" cannot disagree.
@@ -3256,6 +3268,7 @@ pub(crate) async fn get_session(
                     activity_order_hold: None,
                     notifications_read_through,
                     stale: true,
+                    blocked,
                 })
                 .into_response()
             }
@@ -3294,6 +3307,7 @@ pub(crate) async fn get_session(
                         activity_order_hold: None,
                         notifications_read_through,
                         stale: false,
+                        blocked,
                     })
                     .into_response()
                 }
@@ -3567,6 +3581,9 @@ async fn do_restart_session_named(
             extra_instructions,
         )
         .await?;
+    // A restarted agent starts over, so whatever it said it was blocked on is
+    // gone with the run that said it (SPEC.md, Status).
+    crate::attention::clear_blocked(state, &store::SessionKey::new(claim.host, id)).await;
     // Cache publication is best effort; the supervisor's successful reply stands.
     record_session(state, claim, &session).await;
     Ok(session)
@@ -4195,6 +4212,8 @@ async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim,
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's notification marks; a stray row may remain");
     }
+    // Delete and Replace's removal of its source both end here.
+    crate::attention::clear_blocked(state, &key).await;
     forget_session(state, claim, id).await;
 }
 

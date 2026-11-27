@@ -3036,15 +3036,16 @@ sort bucket. A finished session drops below still-running work within its part o
 and a session returning to running sorts with running work on that same key. Creation time is the stable fallback where
 an older supervisor has no work-start observation. The last-activity time shown in the row and the seen/unseen
 comparison stay independent of the order: they describe when the agent was last working (see Status) and neither moves a
-row. The sort buckets and the key are authoritative helm and supervisor data, so every client agrees without keeping a
-private rank.
+row. A blocked session (see Status) sorts as a waiting one does. The sort buckets and the key are authoritative helm and
+supervisor data, so every client agrees without keeping a private rank.
 
 A muted session sorts with idle and ended sessions on the work-start key it had when muted. While it is waiting on a
 connected host, it sorts with active work on its real work-start key so the question can promote it. When the wait ends,
 it returns to the frozen key. Ending the mute keeps the row sorted with idle and ended sessions on that key until the
 next observed work start, even if it is still running. A connected session waiting on the user still sorts with active
 work. The sidebar's pinned rows keep their pin positions. The quick switcher uses the same recently active order,
-including mute's effect on it. Status filters use the real status.
+including mute's effect on it. Status filters use the real status, except that a blocked session counts as waiting: the
+Waiting filter shows it, and Running and Idle do not.
 
 A client holds back reordering while the pointer is over the list, so a row does not move out from under the pointer on
 its way to a click. The hold is display-only and its snapshot is discarded when it ends. The shared pin order, group
@@ -3312,6 +3313,16 @@ before the agent finished starting"; otherwise it reads "stopped by user". While
 alone never becomes a launch error: direct evidence from the launch shim can still report a real failure until an
 annotated exit commits. Host unreachability is per-host connection state, not a session status.
 
+An agent that is blocked and cannot finish what it was asked can say so (`farhelm agent notify`, see Agent-spawned
+sessions), and the helm then marks its session blocked. A blocked session counts as waiting in the session list's order
+and filters, mute included, while the status its supervisor reports stays as it is, so Restart, prompt delivery and the
+other rules that read the status are unchanged. The mark clears when the user switches to that session in an active
+Farhelm window or types, pastes, clicks or drags in its terminal (the app's own focus reports, pointer motion with no
+button held and wheel scrolling do not count, since they can reach a window the user is not using), and when the session
+stops, restarts, ends, is replaced or deleted, or no longer appears in its host's complete listing. It survives helm
+restarts, and a host keeps at most as many marks as its session listing can show. A waiting status the supervisor
+detected is separate and unaffected: it still clears only when the supervisor sees the question go.
+
 After a supervisor restart, a live terminal keeps its last cached status while the supervisor gathers new screen
 evidence. The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch
 error, changed screen, recognized wait, or enough unchanged samples replaces the old answer as soon as observed. A
@@ -3458,9 +3469,8 @@ Farhelm approval cards, finished turns or session-tracking notifications. Window
 
 With the **Agent is blocked** switch on as well, the helm also sends an alert each time an agent says it is blocked
 (`farhelm agent notify`, below): "<title> on <host> is blocked: <reason>". It goes through the same queue, rate cap and
-character rules as the waiting alert. Whatever the switches say, the same report is a notice in the navigation rail's
-notices bell, naming the session and host with the agent's reason; one per session, a later report replacing it as a new
-unread notice, and marking it read resolves it.
+character rules as the waiting alert. Whatever the switches say, the same report marks the session blocked (see Status).
+The reason appears only in the alert; in the app the agent explains itself in its own terminal.
 
 The alert contains the session's title and the host's display name, with control and other invisible or reordering
 characters removed and each capped at 200 characters: "<title> on <host> is waiting for you". A title generated from a
@@ -3554,10 +3564,6 @@ host keeps its last known notices.
 A late Delete notice, or the notice of a Delete an agent asked for, names the host and shows its cleanup details,
 including the path and reason for any checkout left behind and any container whose stop could not be confirmed. Reading
 this notice marks it resolved so it can be cleared from the history.
-
-A blocked-agent notice (`farhelm agent notify`, see the ntfy alerts above) names the session by its title and its host,
-with the agent's reason below. Each session has at most one, a later report replacing it as a new unread notice, and a
-host keeps at most as many as its session listing can show. Reading it marks it resolved, as for a late Delete.
 
 Trash cleanup notices report trashed checkouts whose background cleanup failed. A notice names the host and checkout,
 shows how much space was last measured when known and a short reason, and explains that Farhelm tries again when that
@@ -4910,8 +4916,8 @@ and change their own stored values, even when fleet-wide authority makes the nar
 `farhelm agent notify "<reason>"` tells the user that the asking session is blocked and cannot finish what it was asked,
 for an agent that would otherwise stop silently. It always concerns the asking session, so it names no target. The helm
 turns runs of whitespace into single spaces, removes characters that must not be shown as themselves, refuses an empty
-reason or one longer than 500 characters, records the notices-bell notice and sends the blocked ntfy alert when that is
-on (see Status), then the command prints one confirmation line and exits zero. It works the same on every kind of host,
+reason or one longer than 500 characters, marks the session blocked and sends the blocked ntfy alert when that is on
+(see Status), then the command prints one confirmation line and exits zero. It works the same on every kind of host,
 since it travels the same authenticated route as every agent verb; the session needs neither the ntfy settings nor
 network access of its own.
 
@@ -5913,8 +5919,9 @@ sends is bounded. There is no Add host → Podman, Docker support or macOS conta
 
 The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is
 retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and
-Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts
-as nothing left to remove. Stored sessions still decode their old container configuration, including `image_file`.
+Replace with are refused. Switching to one still clears a blocked mark its agent left (see Status), since nothing else
+but Delete could. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as
+nothing left to remove. Stored sessions still decode their old container configuration, including `image_file`.
 Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an
 explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.
 
