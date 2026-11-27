@@ -6,4 +6,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 9c521b] `blocked-notify-attention-and-debounce.md` — Move blocked-agent alerts to the red waiting indicator and sound with an ntfy awareness grace period
 - [pending] `ntfy-quiet-hours-urgency.md` — Add local-time quiet hours and quiet-hours priority/off setting for ntfy alerts
 - [in-flight da9a40] `drift-persistent-hooks.md` — Add persistent_hooks drift category verifying Grok and Antigravity hooks inside and outside Farhelm (after `drift-base-isolation-and-turns.md`)
-- [complete] `drift-conversation-rotation.md` — Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
+- [landing 9d898a] `drift-conversation-rotation.md` — Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
