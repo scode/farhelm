@@ -42,7 +42,9 @@ an access token; changing the server later clears the saved token when you save,
 When ready to receive automatic alerts, turn on **Enable ntfy alerts**, keep **Agent is waiting for an answer** on, and
 select **Save**. That switch says which agents Farhelm can tell are waiting for you; with other agents, sessions never
 show as waiting, so they never send this alert. A line beside **Send test** says when alerts are saved off or the form has
-unsaved changes: a test alert arriving only shows that the server and topic work.
+unsaved changes: a test alert arriving only shows that the server and topic work. Turn on **Agent is blocked** as well to
+get an alert when an agent runs `farhelm agent notify` to say it cannot finish what you asked; the Notifications bell
+shows those reports either way.
 
 Choose a hard-to-guess topic and keep it private: anyone who knows an ntfy.sh topic can read its alerts. An alert
 contains the session's title and host, so avoid sensitive text in titles if you do not want it sent to that server.
@@ -107,6 +109,10 @@ The bell also tells you when the session list hits Farhelm's limit of 500 sessio
 list shows only its newest 500, and across all your hosts it shows at most 500. Farhelm is built for tens of sessions;
 **Send feedback** in the notice opens the [feedback dialog](/docs/using/send-feedback/) if you need that many or think a
 bug caused it. The notice says **Resolved** once the list fits again.
+
+An agent that cannot finish what you asked can say so with `farhelm agent notify`; the bell then names the session and
+its host, with the agent's reason. A new report from the same session replaces the old one as unread, and reading it
+marks it resolved.
 
 It also tells you when a Delete finished only after Farhelm stopped waiting for it, naming the host and, when one was
 left behind, the checkout's directory and why. If Farhelm could not read your login shell's `PATH` when it started, a

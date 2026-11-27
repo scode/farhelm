@@ -94,6 +94,7 @@ pub(super) const PRIORITIES: [Priority; 5] = [
 struct Form {
     enabled: bool,
     notify_waiting: bool,
+    notify_blocked: bool,
     server_url: String,
     topic: String,
     priority: Priority,
@@ -107,6 +108,7 @@ impl Form {
         Form {
             enabled: stored.enabled,
             notify_waiting: stored.notify_waiting,
+            notify_blocked: stored.notify_blocked,
             server_url: stored.server_url.clone(),
             topic: stored.topic.clone(),
             priority: stored.priority,
@@ -130,6 +132,7 @@ impl Form {
             priority: self.priority,
             token,
             notify_waiting: Some(self.notify_waiting),
+            notify_blocked: Some(self.notify_blocked),
         }
     }
 
@@ -211,6 +214,11 @@ fn and_list(names: &[&str]) -> String {
     }
 }
 
+/// What the blocked switch covers, shown under it: the alert an agent asks for with `farhelm agent notify`, while the
+/// Notifications bell lists those whatever the switch says.
+pub(super) const BLOCKED_HELP: &str = "Sent when an agent runs farhelm agent notify. The Notifications bell lists \
+     these whether or not this is on.";
+
 /// The line beside Send test when the saved settings would make a test mislead: one that arrives proves the server and
 /// topic, not that alerts are on. A maintainer's test passed while no real alert ever came (the plan
 /// `agent-blocked-notifications`), so the form now says what the saved settings do.
@@ -276,6 +284,8 @@ pub(super) enum Switch {
     Enabled,
     /// Alerts when an agent waits for an answer, under the master switch.
     Waiting,
+    /// Alerts when an agent says it is blocked (`farhelm agent notify`), under the master switch.
+    Blocked,
     ClearToken,
 }
 
@@ -293,6 +303,11 @@ impl Switch {
                 "Agent is waiting for an answer",
                 "Alert when a session waits for your answer; Save applies it",
             ),
+            Self::Blocked => (
+                "ntfy-blocked",
+                "Agent is blocked",
+                "Alert when an agent says it cannot finish what you asked; Save applies it",
+            ),
             Self::ClearToken => (
                 "ntfy-clear-token",
                 "Clear saved token",
@@ -308,6 +323,7 @@ pub(super) struct NtfyAlerts {
     pub(super) save_receipt: super::editing::SaveReceipt,
     enabled_focus: gpui::FocusHandle,
     waiting_focus: gpui::FocusHandle,
+    blocked_focus: gpui::FocusHandle,
     clear_focus: gpui::FocusHandle,
     /// What the helm last said it stores: the read's answer, then each done save's. `None` until the read answers.
     stored: Option<Settings>,
@@ -343,6 +359,7 @@ impl NtfyAlerts {
             save_receipt: super::editing::SaveReceipt::default(),
             enabled_focus: cx.focus_handle().tab_stop(true),
             waiting_focus: cx.focus_handle().tab_stop(true),
+            blocked_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
             stored: None,
             unreadable: None,
@@ -444,6 +461,7 @@ impl NtfyAlerts {
         match switch {
             Switch::Enabled => &self.enabled_focus,
             Switch::Waiting => &self.waiting_focus,
+            Switch::Blocked => &self.blocked_focus,
             Switch::ClearToken => &self.clear_focus,
         }
     }
@@ -717,6 +735,7 @@ impl NtfyAlerts {
         let edited = self.stored.as_ref().is_some_and(|stored| match switch {
             Switch::Enabled => on != stored.enabled,
             Switch::Waiting => on != stored.notify_waiting,
+            Switch::Blocked => on != stored.notify_blocked,
             Switch::ClearToken => on,
         });
         let caption = super::editing::caption(label, edited.then(|| theme::palette(cx)));
@@ -728,6 +747,7 @@ impl NtfyAlerts {
                 waiting_agents(),
                 cx,
             )),
+            Switch::Blocked => card::switch_copy(caption, BLOCKED_HELP, cx),
         };
         div().child(
             Checkbox::new(id, label, HoverHelp::tooltip(help), Role::Switch)
@@ -976,6 +996,12 @@ impl Render for NtfyAlerts {
                         Switch::Waiting,
                         form.notify_waiting,
                         |form, on| form.notify_waiting = on,
+                        cx,
+                    ),
+                    self.switch(
+                        Switch::Blocked,
+                        form.notify_blocked,
+                        |form, on| form.notify_blocked = on,
                         cx,
                     ),
                     fields,

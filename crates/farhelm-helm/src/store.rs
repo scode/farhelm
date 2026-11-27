@@ -374,7 +374,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 103;
+pub(crate) const SCHEMA_VERSION: i64 = 104;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -3276,7 +3276,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 103;",
+              PRAGMA user_version = 104;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
             custom_agents_schema = crate::custom_agents::SCHEMA,
@@ -5334,6 +5334,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 103;")
             .context("migrating helm.db to schema version 103")?;
         version = 103;
+    }
+    if version == 103 {
+        crate::notices::upgrade_agent_blocked_notice(&tx)
+            .context("adding blocked-agent notices")?;
+        tx.execute_batch("PRAGMA user_version = 104;")
+            .context("migrating helm.db to schema version 104")?;
+        version = 104;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

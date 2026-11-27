@@ -549,6 +549,9 @@ impl AgentRequestHandler for HelmAgentRequests {
             ParsedAgentVerb::OpenUrl { url } => {
                 crate::browser::open_url(&state, origin, session_id, url).await
             }
+            ParsedAgentVerb::Notify { reason } => {
+                notify_blocked(&state, origin, session_id, &caller_entry_uuid, reason).await
+            }
             ParsedAgentVerb::Rename {
                 session_id: target,
                 expected_title,
@@ -1212,6 +1215,10 @@ enum ParsedAgentVerb {
     OpenUrl {
         url: String,
     },
+    /// `farhelm agent notify`, its reason already cleaned ([`notify_reason`]).
+    Notify {
+        reason: String,
+    },
     Rename {
         session_id: NonEmptyString,
         expected_title: String,
@@ -1284,6 +1291,72 @@ enum ParsedAgentVerb {
     },
 }
 
+/// An agent's `farhelm agent notify` reason as the bell and the ntfy alert show it: every run of whitespace (line breaks
+/// included) one space, characters that must not be shown as themselves removed (the shared presentation list, as for
+/// alert titles), trimmed. Refused when nothing is left, or when it is longer than
+/// [`farhelm_proto::AGENT_NOTIFY_REASON_CAP`] characters: the agent is asked for one short sentence, and a refusal
+/// tells it to shorten rather than have the end of its reason silently cut off.
+fn notify_reason(reason: &str) -> Result<String, String> {
+    // Unsafe characters go first, so one standing between two spaces cannot leave
+    // a double space behind once whitespace is collapsed.
+    let safe: String = reason
+        .chars()
+        .filter(|c| c.is_whitespace() || !farhelm_proto::text::is_presentation_unsafe(*c))
+        .collect();
+    let cleaned = safe.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        return Err("the reason must say what is blocked and why; it was empty".to_string());
+    }
+    let cap = farhelm_proto::AGENT_NOTIFY_REASON_CAP;
+    let length = cleaned.chars().count();
+    if length > cap {
+        return Err(format!(
+            "the reason is {length} characters, more than the {cap} a notification may carry; keep it to one \
+             short sentence"
+        ));
+    }
+    Ok(cleaned)
+}
+
+/// Answer an agent's `farhelm agent notify` for its own session: record the bell's notice whatever the ntfy settings
+/// say, then queue the ntfy alert, which the sender sends only while blocked alerts are on. The session's title is the
+/// helm's cached one; a session not cached yet (it has just started) is named by its id, so the notice still says
+/// which session it is. The notice names the session by the id clients know it by, with its host's entry
+/// (`entry_uuid`), so the desktop can tell it from a session of the same bare id on another host.
+async fn notify_blocked(
+    state: &Arc<AppState>,
+    origin: AgentOrigin,
+    session_id: &str,
+    entry_uuid: &str,
+    reason: String,
+) -> anyhow::Result<AgentReply> {
+    let key = crate::store::SessionKey::new(origin.host, session_id);
+    let served_id = farhelm_proto::SessionRef::new(entry_uuid, session_id)
+        .map(|reference| reference.to_string())
+        .unwrap_or_else(|_| session_id.to_owned());
+    let title = state
+        .store
+        .cached_session(origin.host, session_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|info| info.title)
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| session_id.to_owned());
+    state
+        .store
+        .record_agent_blocked(
+            key,
+            served_id,
+            title.clone(),
+            reason.clone(),
+            Arc::clone(state.manager.events()),
+        )
+        .await?;
+    state.ntfy.enqueue_blocked(title, origin.host, reason);
+    Ok(AgentReply::Notified {})
+}
+
 impl ParsedAgentVerb {
     /// Check the wire fields at the same boundary and in the same refusal order.
     ///
@@ -1325,6 +1398,9 @@ impl ParsedAgentVerb {
             AgentVerb::Agents {} => Self::Agents,
             AgentVerb::Templates {} => Self::Templates,
             AgentVerb::OpenUrl { url } => Self::OpenUrl { url },
+            AgentVerb::Notify { reason } => Self::Notify {
+                reason: notify_reason(&reason)?,
+            },
             AgentVerb::Prompt { session_id, prompt } => {
                 let session_id = NonEmptyString::required(session_id, "--session")?;
                 if session_id.as_str().chars().any(char::is_control) {
@@ -6186,6 +6262,165 @@ mod tests {
     // ---------------------------------------------------------------
 
     use crate::rest_harness::{FleetBuilder, Harness, HostScript, local_id, session};
+
+    /// The bell and the ntfy alert show an agent's reason as-is, so the helm cleans it at the boundary: an agent can
+    /// pass any bytes, including line breaks, and a reordering character could make the alert misread. Specified:
+    /// whitespace runs (line breaks included) become one space and the ends are trimmed; presentation-unsafe
+    /// characters are removed; an empty or whitespace-only reason, and one over the cap, are refused; one at the cap
+    /// is kept.
+    #[test]
+    fn a_notify_reason_is_cleaned_and_bounded() {
+        assert_eq!(
+            notify_reason("  deploy:\n  no\tcredentials  ").as_deref(),
+            Ok("deploy: no credentials")
+        );
+        assert_eq!(
+            notify_reason("a\u{202e}b").as_deref(),
+            Ok("ab"),
+            "a right-to-left override is removed"
+        );
+        assert_eq!(
+            notify_reason("a \u{200b} b").as_deref(),
+            Ok("a b"),
+            "a removed character between spaces leaves one space"
+        );
+        assert!(notify_reason(" \n\t ").is_err());
+        let cap = farhelm_proto::AGENT_NOTIFY_REASON_CAP;
+        assert!(notify_reason(&"x".repeat(cap)).is_ok());
+        assert!(notify_reason(&"x".repeat(cap + 1)).is_err());
+    }
+
+    /// SPEC.md: `farhelm agent notify` concerns the asking session only, asks nobody, and always reaches the bell.
+    /// Specified: on a fleet whose local session `local-live` is listed, a Notify from it with a reason answers
+    /// `Notified` and leaves one blocked notice for the local host naming `local-live` by its served id, its title and the cleaned
+    /// reason; an empty reason is refused as an invalid request and records nothing more.
+    #[farhelm_testtrace::test]
+    async fn notify_records_a_bell_notice_for_the_asking_session() {
+        let (h, local, _remote) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "local-live",
+                AgentVerb::Notify {
+                    reason: "tests:\n need a decision".into(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Notified {}
+                }
+            ),
+            "{outcome:?}"
+        );
+        let notices = h.store.notices().await.unwrap().notices;
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(notices[0].host, Some(local));
+        assert_eq!(
+            notices[0].content,
+            farhelm_proto::notices::NoticeContent::AgentBlocked {
+                session_id: full_id(&h, local, "local-live"),
+                session_title: "local-live".into(),
+                reason: "tests: need a decision".into(),
+            }
+        );
+        let refused = handler
+            .handle(
+                origin_of(&h, local),
+                "local-live",
+                AgentVerb::Notify {
+                    reason: "   ".into(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(
+                refused,
+                AgentOutcome::Err {
+                    kind: ErrorKind::InvalidRequest,
+                    ..
+                }
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(h.store.notices().await.unwrap().notices.len(), 1);
+    }
+
+    /// The bell names the blocked session by the title the user knows it by, and a session the helm has not cached yet
+    /// (one that has only just started) must still be named somehow. Specified: on a local host listing "local-live"
+    /// titled "Build console", a Notify from "local-live" records that title, and one from "never-listed", which the
+    /// cache does not hold, records "never-listed" as the title.
+    #[farhelm_testtrace::test]
+    async fn notify_names_the_session_by_its_cached_title_or_else_its_id() {
+        let h = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![SessionInfo {
+                    title: "Build console".into(),
+                    ..scripted("local-live", 30, farhelm_proto::AgentKind::Claude)
+                }],
+                ..HostScript::default()
+            })
+            .await
+            .start()
+            .await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        for session in ["local-live", "never-listed"] {
+            let outcome = handler
+                .handle(
+                    origin_of(&h, local),
+                    session,
+                    AgentVerb::Notify {
+                        reason: "blocked".into(),
+                    },
+                )
+                .await;
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Ok {
+                        reply: AgentReply::Notified {}
+                    }
+                ),
+                "{session}: {outcome:?}"
+            );
+        }
+        let titles: std::collections::BTreeMap<String, String> = h
+            .store
+            .notices()
+            .await
+            .unwrap()
+            .notices
+            .into_iter()
+            .filter_map(|notice| match notice.content {
+                farhelm_proto::notices::NoticeContent::AgentBlocked {
+                    session_id,
+                    session_title,
+                    ..
+                } => Some((session_id, session_title)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            titles,
+            std::collections::BTreeMap::from([
+                (
+                    full_id(&h, local, "local-live"),
+                    "Build console".to_string()
+                ),
+                (
+                    full_id(&h, local, "never-listed"),
+                    "never-listed".to_string()
+                ),
+            ])
+        );
+    }
 
     /// The live connection's origin for `host`, as the client itself would
     /// have supplied it.

@@ -179,6 +179,7 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         | AgentReply::Created { .. }
         | AgentReply::TemplateWritten { .. }
         | AgentReply::UrlOpened {}
+        | AgentReply::Notified {}
         | AgentReply::TemplateDeleted {}
         | AgentReply::HostAddAccepted { .. }
         | AgentReply::HostEdited { .. }

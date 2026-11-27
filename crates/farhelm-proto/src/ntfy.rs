@@ -58,6 +58,10 @@ pub struct Settings {
     /// alerts it always sent.
     #[serde(default = "waiting_default")]
     pub notify_waiting: bool,
+    /// Alert when an agent says it is blocked (`farhelm agent notify`). Off by default, including for configurations
+    /// saved before it existed.
+    #[serde(default)]
+    pub notify_blocked: bool,
 }
 
 /// What an absent `notify_waiting` means: on, the only alert there used to be.
@@ -74,6 +78,7 @@ impl Default for Settings {
             priority: Priority::Default,
             token_set: false,
             notify_waiting: true,
+            notify_blocked: false,
         }
     }
 }
@@ -84,6 +89,12 @@ impl Settings {
     /// policy reads this to decide whether to track waiting spells at all.
     pub fn sends_waiting_alerts(&self) -> bool {
         self.enabled && self.notify_waiting && !self.topic.is_empty()
+    }
+
+    /// Whether the helm should send an ntfy alert when an agent says it is blocked: the master switch, the blocked
+    /// switch and a topic. The bell notice does not depend on this.
+    pub fn sends_blocked_alerts(&self) -> bool {
+        self.enabled && self.notify_blocked && !self.topic.is_empty()
     }
 }
 
@@ -104,6 +115,9 @@ pub struct SaveSettings {
     /// back on that a newer client turned off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_waiting: Option<bool>,
+    /// See [`Settings::notify_blocked`]; absent keeps the stored value, as for `notify_waiting`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_blocked: Option<bool>,
 }
 
 #[cfg(test)]
@@ -111,8 +125,9 @@ mod tests {
     use super::*;
 
     /// Configurations written before the waiting switch existed must keep the waiting alerts they always had, and a
-    /// save from a client that predates the switch must leave it as stored. Specified: stored settings JSON without
-    /// `notify_waiting` decodes with it on, the defaults have it on, and a save body without it decodes as none.
+    /// save from a client that predates the switch must leave it as stored; the blocked switch, newer still, starts off.
+    /// Specified: stored settings JSON without either switch decodes with waiting on and blocked off, the defaults have
+    /// waiting on, and a save body without them decodes both as none.
     #[test]
     fn a_missing_waiting_switch_reads_as_on() {
         let stored: Settings = serde_json::from_str(
@@ -120,11 +135,13 @@ mod tests {
         )
         .expect("old settings decode");
         assert!(stored.notify_waiting);
+        assert!(!stored.notify_blocked, "blocked alerts start off");
         let save: SaveSettings = serde_json::from_str(
             r#"{"enabled":true,"server_url":"https://ntfy.sh","topic":"t","priority":"default","token":null}"#,
         )
         .expect("old save decodes");
         assert_eq!(save.notify_waiting, None);
+        assert_eq!(save.notify_blocked, None);
         assert!(Settings::default().notify_waiting);
     }
 

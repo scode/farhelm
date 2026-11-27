@@ -3662,6 +3662,20 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         // The helm owns URL validation and link permission decisions. This relay only
         // authenticates the session and forwards; an untrusted host cannot grant a link.
         AgentVerb::OpenUrl { .. } => Ok(()),
+        // The helm cleans the reason and caps it in characters. This hop only
+        // bounds its bytes, so a runaway reason cannot ride the relay's queues:
+        // four bytes for each character the helm would keep is the most UTF-8 needs.
+        AgentVerb::Notify { reason } => {
+            let cap = farhelm_proto::AGENT_NOTIFY_REASON_CAP * 4;
+            if reason.len() > cap {
+                return Err(format!(
+                    "the reason is {} bytes, more than the {cap} a notification may carry; keep it to \
+                     one short sentence",
+                    reason.len()
+                ));
+            }
+            Ok(())
+        }
         AgentVerb::Hosts {}
         | AgentVerb::Sessions {}
         | AgentVerb::Agents {}
@@ -7211,6 +7225,22 @@ mod tests {
             );
         }
         assert!(validate_agent_verb(&edit("h", Some(HostAliasEdit::Set("baz".into())))).is_ok());
+    }
+
+    /// The helm cleans and caps a notify reason in characters, but the relay's queues carry it first, so this hop bounds
+    /// its bytes. Specified: a reason of four bytes per character of `AGENT_NOTIFY_REASON_CAP` passes, and one byte more
+    /// is refused with a message that names the size and asks for one short sentence.
+    #[farhelm_testtrace::test]
+    fn validate_agent_verb_bounds_the_notify_reason() {
+        let cap = farhelm_proto::AGENT_NOTIFY_REASON_CAP * 4;
+        let notify = |reason: String| AgentVerb::Notify { reason };
+        assert!(validate_agent_verb(&notify("x".repeat(cap))).is_ok());
+        let refused = validate_agent_verb(&notify("x".repeat(cap + 1))).unwrap_err();
+        assert!(
+            refused.contains(&format!("{} bytes", cap + 1))
+                && refused.contains("one short sentence"),
+            "{refused}"
+        );
     }
 
     /// The environment verb crosses this doorway with the same bounds as an

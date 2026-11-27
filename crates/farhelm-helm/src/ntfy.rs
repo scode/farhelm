@@ -89,6 +89,9 @@ impl Config {
                 notify_waiting: save
                     .notify_waiting
                     .unwrap_or(previous.settings.notify_waiting),
+                notify_blocked: save
+                    .notify_blocked
+                    .unwrap_or(previous.settings.notify_blocked),
             },
             token,
         })
@@ -265,6 +268,35 @@ struct Inner {
 struct Alert {
     title: String,
     host: crate::store::HostId,
+    kind: AlertKind,
+}
+
+/// Which event an alert reports. Each has its own switch under the master one,
+/// and both share the queue, the rate window and the sender.
+enum AlertKind {
+    /// A session settled into waiting for the user ([`Policy`]).
+    Waiting,
+    /// An agent said it is blocked (`farhelm agent notify`), with its reason,
+    /// already cleaned and capped by the helm.
+    Blocked { reason: String },
+}
+
+impl AlertKind {
+    /// Whether `settings` send this kind of alert now.
+    fn sends(&self, settings: &Settings) -> bool {
+        match self {
+            Self::Waiting => settings.sends_waiting_alerts(),
+            Self::Blocked { .. } => settings.sends_blocked_alerts(),
+        }
+    }
+
+    /// The alert's text for a session titled `title` on the host named `host`.
+    fn body(&self, title: &str, host: &str) -> String {
+        match self {
+            Self::Waiting => format!("{title} on {host} is waiting for you"),
+            Self::Blocked { reason } => format!("{title} on {host} is blocked: {reason}"),
+        }
+    }
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -305,9 +337,10 @@ impl Alerts {
                     }
                 };
                 // The policy stops tracking spells once alerts are off, but an
-                // alert queued just before a save turned them off still lands here.
-                if !config.settings.sends_waiting_alerts() {
-                    tracing::debug!("ntfy waiting alerts are off; dropping a queued alert");
+                // alert queued just before a save turned them off still lands
+                // here, and a blocked alert is queued whatever the switches say.
+                if !alert.kind.sends(&config.settings) {
+                    tracing::debug!("this kind of ntfy alert is off; dropping a queued alert");
                     continue;
                 }
                 let Some(dropped) = window.admit(Instant::now()) else {
@@ -329,16 +362,12 @@ impl Alerts {
                     host.destination.as_deref(),
                     host.alias.as_deref(),
                 );
-                let mut body = format!(
-                    "{} on {} is waiting for you",
-                    alert.title,
-                    clean_text(&name)
-                );
+                let mut body = alert.kind.body(&alert.title, &clean_text(&name));
                 if dropped > 0 {
                     body.push_str(&format!(" (and {dropped} more)"));
                 }
                 match post(task_client.as_ref(), &config, body).await {
-                    Ok(()) => tracing::info!("ntfy waiting alert sent"),
+                    Ok(()) => tracing::info!("ntfy alert sent"),
                     Err(reason) => tracing::warn!(%reason, "ntfy alert failed; dropping alert"),
                 }
             }
@@ -353,15 +382,32 @@ impl Alerts {
 
     /// A synchronous try-send keeps network and queue waits out of host refresh.
     pub(crate) fn enqueue(&self, title: String, host: crate::store::HostId) {
-        if self
-            .0
-            .queue
-            .try_send(Alert {
-                title: clean_text(&title),
-                host,
-            })
-            .is_err()
-        {
+        self.send(Alert {
+            title: clean_text(&title),
+            host,
+            kind: AlertKind::Waiting,
+        });
+    }
+
+    /// Queue an alert that the agent in a session titled `title` on `host`
+    /// says it is blocked, for `reason` (already cleaned and capped by the
+    /// caller). The sender drops it unless blocked alerts are on.
+    pub(crate) fn enqueue_blocked(
+        &self,
+        title: String,
+        host: crate::store::HostId,
+        reason: String,
+    ) {
+        self.send(Alert {
+            title: clean_text(&title),
+            host,
+            kind: AlertKind::Blocked { reason },
+        });
+    }
+
+    /// Try-send one alert, dropping it with a warning when the queue is full or gone.
+    fn send(&self, alert: Alert) {
+        if self.0.queue.try_send(alert).is_err() {
             tracing::warn!("ntfy alert queue unavailable or full; dropping alert");
         }
     }

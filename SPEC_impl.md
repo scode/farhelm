@@ -6284,6 +6284,16 @@ and their cause chains are never displayed. The ntfy response body is ignored. N
 or title. Dropping the final sender handle aborts the owned task; it holds no handle back to itself or the manager.
 Test-built helms default offline and inject a loopback client only for alert tests.
 
+Blocked alerts share that queue, sender and rate window as a second alert kind. `farhelm agent notify` relays
+`AgentVerb::Notify` (protocol 93) over the authenticated agent relay. It is not a mutating verb, so it takes no session
+change fence: an agent blocked on its own change still waiting for an approval card can report it, and a retry after a
+lost answer only replaces the same notice. The supervisor only bounds the reason's bytes; the helm cleans it (refusing
+an empty or over-long one), then, for the asking session alone and without an approval, writes a host-scoped
+`agent_blocked` notice keyed by the session id with `INSERT OR REPLACE` (a fresh id per report, at most one row per
+session, and at most `LIST_SESSIONS_CAP` per host, since the session id comes from an untrusted supervisor; reading it
+resolves it, as for a late Delete; helm schema 104 widened the notices kinds) and try-sends a blocked alert, which the
+sender drops unless the master switch, the blocked switch and a topic are all set.
+
 Protected GET/PUT `/api/ntfy-alerts` read/save an independent schema-47 singleton, not the queued shared preferences.
 The JSON stored in helm.db includes the token; the response contains only `token_set`. Saves atomically preserve an
 omitted/null token only for the same server origin (scheme, host and effective port, with default ports normalized),
