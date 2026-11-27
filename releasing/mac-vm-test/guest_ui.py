@@ -9,7 +9,7 @@ import json
 import math
 import time
 
-from checkpoint_contract import relaunch_checks_app_only
+from checkpoint_contract import relaunch_checks_app_only, required_operations
 from window_geometry import image_metadata
 
 
@@ -63,8 +63,9 @@ coordinates as args [[x,y]], never ordinary click or an accessibility index.
 That action clicks once, waits for the candidate process, and rebinds only after
 observing it running. It never launches an absent Farhelm. Use method quit with
 args [] to send Command-Q to bound Farhelm. For reopen, take the before sample
-first. For signed announcements, verify publication first and bind again after
-the staged launch before the second Quit. Native images are
+first. For a staged updater override, quit the running previous release once
+before launch_override. For signed announcements, verify publication first and
+bind again after the staged launch before the second Quit. Native images are
 returned unchanged. An AX-plus-screenshot request can return only menu AX text:
 that is no captured image. Dismiss the menu normally and request the actual
 acceptance screenshot. Tool/permission failures stop the attempt.''',
@@ -133,13 +134,23 @@ class NativeUI:
         return dict(message, params={'name': 'js', 'arguments': {'code': code, 'title': f'{target}: {method}'}})
 
     def require_quit_ready(self):
-        """Authorize one Quit per announcement launch or one sampled continuity Quit.
+        """Authorize Quit at the process boundary owned by the current checkpoint.
 
 The provider acknowledges input. The managed launch separately checks for the
 process to exit before opening the next app.
 """
         check = self.operations.task['check_id']
         completed = self.operations.completed
+        if self.quits_for_update_override():
+            if 'override_quit' in completed or 'launch_override' in completed:
+                raise RuntimeError('native Quit was already attempted for this update override')
+            observed = self.operations.version()
+            previous = self.operations.context['previous'].removeprefix('v')
+            if ('farhelm' not in self.bound
+                    or not observed['desktop_running']
+                    or observed['running_versions'] != [previous]):
+                raise RuntimeError('bind the running previous release before native Quit')
+            return
         if check == 'p2-announcements':
             if not self.operations.observations.get('announcements_feed', {}).get('available'):
                 raise RuntimeError('verify publication before native Quit')
@@ -150,12 +161,21 @@ process to exit before opening the next app.
                 raise RuntimeError('bind the running candidate before native Quit')
             return
         if check != 'reopen' or 'reopen_quit' in completed:
-            raise RuntimeError('native Quit requires a reopen or signed announcements attempt')
+            raise RuntimeError('native Quit requires an update override, reopen or signed announcements attempt')
         before = self.operations.observations.get('continuity_reopen_before')
         if 'farhelm' not in self.bound or before is None:
             raise RuntimeError('bind the candidate and take the before sample before native Quit')
         if self.operations.version()['desktop_pids'] != before['desktop_pids']:
             raise RuntimeError('the before-sample app is absent or changed before native Quit')
+
+    def quits_for_update_override(self):
+        """The split P0 relaunch must use the updater left running by discovery.
+
+Bonus pairs combine discovery and Restart to update in the relaunch checkpoint.
+"""
+        task = self.operations.task
+        return 'launch_override' in required_operations(
+            task['check_id'], task['pass_id'], self.operations.context.get('update_path'))
 
     def bind_code(self, target):
         """Refuse to use getApp as a launch fallback after a missing product restart."""
@@ -180,6 +200,8 @@ so frame evidence cannot silently borrow a previous screenshot's calibration.
         if parameters['method'] == 'quit':
             if self.operations.task['check_id'] == 'p2-announcements':
                 self.announcement_quits.add('launch_announcements' in self.operations.completed)
+            elif self.quits_for_update_override():
+                self.operations.completed.add('override_quit')
             else:
                 self.operations.completed.add('reopen_quit')
             self.bound.discard(parameters['target'])

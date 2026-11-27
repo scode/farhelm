@@ -101,6 +101,43 @@ class NativeUITests(unittest.TestCase):
                 ui.prepare(quit_call)
         self.assertNotIn('reopen_quit', self.operations.completed)
 
+    def test_staged_override_can_quit_before_discovery_but_not_before_p0_restart(self):
+        """Only checkpoints that stage the override can quit the old process.
+
+P0 keeps that process running across checkpoints so its Restart to update
+offer can drive the candidate relaunch. Bonus discovery and restart share a
+checkpoint. A second Quit in that checkpoint could dismiss the running updater.
+"""
+        cases = (
+            ('update-discovery', 'p0-updater-upgrade', 'override', True),
+            ('update-relaunch', 'upgrade-v0.29.0', 'override', True),
+            ('update-relaunch', 'p0-updater-upgrade', 'override', False),
+            ('update-discovery', 'p0-updater-upgrade', 'ordinary', False),
+        )
+        for check, pass_id, path, can_quit in cases:
+            with self.subTest(check=check, pass_id=pass_id, path=path):
+                self.task.update(check_id=check, pass_id=pass_id)
+                self.operations.context['update_path'] = path
+                self.operations.completed.clear()
+                ui = NativeUI(self.operations)
+                call = ui_call(1, 'farhelm', 'quit', [])
+                with mock.patch.object(self.operations, 'version', return_value=version('0.29.0')):
+                    if not can_quit:
+                        ui.bound.add('farhelm')
+                        with self.assertRaisesRegex(RuntimeError, 'requires an update override'):
+                            ui.prepare(call)
+                        continue
+                    with self.assertRaisesRegex(RuntimeError, 'bind the running previous release'):
+                        ui.prepare(call)
+                    ui.bound.add('farhelm')
+                    request = ui.prepare(call)
+                    self.assertEqual(request['params']['arguments']['code'], 'await brickFarhelm.pressKey("super+q");')
+                    ui.complete(call['params']['arguments'], {'result': {'content': []}})
+                    self.assertNotIn('farhelm', ui.bound)
+                    self.assertNotIn('reopen_quit', self.operations.completed)
+                    with self.assertRaisesRegex(RuntimeError, 'already attempted'):
+                        ui.prepare(call)
+
     def test_ax_only_menu_observation_cannot_reuse_an_earlier_image(self):
         """A successful menu observation may omit its image; retain it without borrowing stale calibration."""
         self.task.update(check_id='native-preflight', pass_id='fresh')
