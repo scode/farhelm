@@ -14000,7 +14000,7 @@ mod client_bodies {
                     .get("confirmed_size")
                     .is_some(),
                 confirmed_size.is_some(),
-                "an unconfirmed body can still be read by an older helm"
+                "a confirmed body names its size and an unconfirmed one leaves it out"
             );
             let req: EnvironmentCreateRequest = decode(&body);
             let EnvironmentCreateBody {

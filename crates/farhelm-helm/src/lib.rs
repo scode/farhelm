@@ -568,10 +568,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/environment-sessions",
             axum::routing::post(sessions::create_environment_session),
         )
-        .route(
-            "/api/sandbox-sessions",
-            axum::routing::post(sessions::create_sandbox_session),
-        )
         .route("/api/notices", get(notices::get))
         .route("/api/notices/marks", axum::routing::post(notices::marks))
         .route("/api/sessions/{id}/tunnels", get(tunnels::list_tunnels))

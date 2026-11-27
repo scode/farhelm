@@ -360,11 +360,10 @@ Handlers bound how long the app waits for a reply:
   progress where it exists; otherwise the outcome goes in one bounded operation-result collection keyed by envelope id,
   with explicit completion and removal rules. "Accepted" settles the transport watchdog. It does not mean the work
   succeeded.
-- An environment session create (`POST /api/environment-sessions`, and its legacy Tensorlake spelling
-  `POST /api/sandbox-sessions`) answers 202 with `{host_id, run_id}` once admitted, and its outcome lands on that run in
-  the pushed host progress: completed, or failed with the "Not launched." reason. A failed run's message is always the
-  whole text to show, so a client adds no lead of its own: it leads with "Not launched." unless the run is
-  `outcome_unknown` (below). On completed, the client finds the new session by reading
+- An environment session create (`POST /api/environment-sessions`) answers 202 with `{host_id, run_id}` once admitted,
+  and its outcome lands on that run in the pushed host progress: completed, or failed with the "Not launched." reason. A
+  failed run's message is always the whole text to show, so a client adds no lead of its own: it leads with "Not
+  launched." unless the run is `outcome_unknown` (below). On completed, the client finds the new session by reading
   `GET /api/sessions?host=<host_id>`, which answers from the helm's cache without waiting on a host, and not from the
   pushed session list, the channel's filtered and capped query, which can leave a session on a new host out and can
   bring it a push after the run's end. That read holds exactly the one session: the new environment starts with none,
@@ -1030,10 +1029,9 @@ permission leaves with the launch that carries it.
 
 **Create and launch** carries the sandbox's displayed CPU, memory and disk from the answered question. A confirmed
 request to `POST /api/environment-sessions` requires that size. The helm compares it against the recipe definition used
-for registration and creation and refuses a mismatch before registering the host or calling the provider. The legacy
-`POST /api/sandbox-sessions` still accepts the confirmation flag alone and checks the size when supplied. Unconfirmed
-container launches and launches using the Tensorlake skip setting omit the size. A confirmed launch needs a helm that
-accepts the new field, so the launcher surfaces a refusal from an older helm.
+for registration and creation and refuses a mismatch before registering the host or calling the provider; it also
+refuses a confirmation that names no size. Unconfirmed container launches and launches using the Tensorlake skip setting
+omit the size.
 
 A question has Cancel and its confirming answer at the ends, and may carry extra answers between them, in the order the
 feature adds them, for the questions SPEC.md asks with more than two (the template editor's "Keep editing, Discard, or
@@ -7229,12 +7227,12 @@ host actor supplies reconnect, credentials, tunnels, updates and session aggrega
 permanent rail icons and ordinary launch/template/agent host choices filter it. Hosts and the existing sidebar attention
 list use their ordinary rows and remedies. Do not create a second diagnostic projection or management path.
 
-A recipe launch has a distinct protected route. Older ordinary-create decoders ignore unknown fields and default an
-absent host to local, so a recipe request must never fall through to ordinary creation on an older helm. The helm
-composes prepared-snapshot, Tensorlake add-run and session-create facilities with existing progress and run limits. It
-records the owned row and `farhelm-sess-<tag>-…` name before billed work. API key, readable local SSH pair and a built
-snapshot are prerequisites; local key presence does not prove account registration. Reuse the registration remedy for
-SSH public-key refusal. Missing software snapshots are not built by session launch. Set `timeout_secs: 1800` and
+A recipe launch has a distinct protected route. The ordinary create ignores unknown fields and defaults an absent host
+to local, so a recipe request must never fall through to ordinary creation, where it would run on the wrong machine. The
+helm composes prepared-snapshot, Tensorlake add-run and session-create facilities with existing progress and run limits.
+It records the owned row and `farhelm-sess-<tag>-…` name before billed work. API key, readable local SSH pair and a
+built snapshot are prerequisites; local key presence does not prove account registration. Reuse the registration remedy
+for SSH public-key refusal. Missing software snapshots are not built by session launch. Set `timeout_secs: 1800` and
 `auto_resume: false`; credentials and tunnels keep ordinary Add warning semantics.
 
 For managed checkouts, carry repository and naming intent until the new supervisor connects, then use its existing
