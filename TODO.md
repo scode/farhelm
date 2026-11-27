@@ -70,43 +70,48 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Show "too large to copy contents" on file hover cards over the copy cap.** When a hovered terminal file path exceeds
   the 10 MB Shift-Cmd-click copy cap, adjust the hover card hint to say "too large to copy contents" instead of omitting
-  the copy hint.
+  the copy hint. Plan: `plans/queue/file-hover-too-large-hint.md`.
 
 - **Stop other free-text CLI options from swallowing following flags, and audit CLI parsing.** Give the remaining
   free-text options (`--alias`, `--title`, `--host`, etc.) the same treatment as `--model` and `--effort` (#5129) so
   omitted values do not swallow a following flag (for example, `farhelm agent host add dev --alias --tailscale`). During
   planning, do a full sweep of Farhelm's command-line parsing and surface anything that departs from normal
   best-practice Rust `clap` subcommands and default behavior to the maintainer so agent-introduced quirks can be
-  reviewed.
+  reviewed. Plan: `plans/queue/cli-flag-parsing-audit.md`.
 
 - **Add a Tailscale column to plain `farhelm agent hosts` output.** Show each host's Tailscale setting in the non-JSON
   table output of `farhelm agent hosts`, matching the `tailscale` field added to `farhelm agent hosts --json` (#5126).
+  Plan: `plans/queue/agent-hosts-tailscale-column.md`.
 
 - **Delete dead fresh-checkout Replace code in the desktop app.** After #5142 made the helm Replace API refuse
   destination folder changes and fresh managed checkouts, remove the now-unreachable desktop launcher wording and
   Replace code for starting a fresh managed checkout inside an existing sandbox or container session (and clean up the
-  stale `replace-checkout-lifetime.md` changelog draft if still unreleased).
+  stale `replace-checkout-lifetime.md` changelog draft if still unreleased). Plan:
+  `plans/queue/delete-dead-replace-checkout-ui.md`.
 
-- **Cmd+T to create a new terminal tab.** Cmd+T to create a new terminal tab.
+- **Cmd+T to create a new terminal tab.** Cmd+T to create a new terminal tab. Plan:
+  `plans/queue/terminal-tab-shortcuts.md`.
 
 - **Cmd+W in a terminal tab closes only the tab.** Cmd+W when in a terminal tab should just close the tab, not the
-  entire session.
+  entire session. Plan: `plans/queue/terminal-tab-shortcuts.md`.
 
 - **Overflowing terminal tabs go invisible.** When there are more terminal tabs than fit visually, they just go
   invisible beneath the buttons to the right. You can still create new terminals, you can still switch between them
   using the keyboard, but they're just awkwardly invisible, and you can't see the current terminal that's selected, and
-  we need to fix that.
+  we need to fix that. Plan: `plans/queue/terminal-tab-overflow-ux.md`.
 
 - **Warn before Cmd+W on the main agent kills terminal tabs.** When you hit Command W and the current Selected tab is
   the main agent, the current default behavior is to kill the entire session. Let's give a warning to the user, even if
   they otherwise have disabled the confirmation dialog, if there are other Terminal tabs, then we still give a warning.
+  Plan: `plans/queue/terminal-tab-shortcuts.md`.
 
 - **Blocked notify should also go red-active and ring the bell.** When an agent reported being blocked with
   `farhelm agent notify`, it generated the ntfy notifications, but did NOT generate a "red active" and bell like when
   the question tool is used. It should have generated both. Fix that, and overall talk about related tweaks during
-  planning.
+  planning. Plan: `plans/queue/blocked-notify-attention-and-debounce.md`.
 
-- **Control ntfy urgency by schedule.** Allow controlling ntfy urgency by schedule.
+- **Control ntfy urgency by schedule.** Allow controlling ntfy urgency by schedule. Plan:
+  `plans/queue/ntfy-quiet-hours-urgency.md`.
 
 ### Must run attended
 
@@ -159,9 +164,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Make the main agent tab closeable like any other terminal tab.** Allow closing the main agent tab on its own while
+  keeping the session and any open shell tabs alive, with Restart/Replace recreating the agent tab and its only special
+  status being that it always sits left-most when present. Deferred from `terminal-tab-shortcuts` because it spans the
+  protocol, supervisor, helm, desktop UI, and product spec and needs decisions on two design tensions: Replace currently
+  deletes the session (killing all shell tabs) while Restart is only available for resumable conversations, and closing
+  the last tab needs clear session-deletion vs. recovery-card semantics (including managed checkouts and disposable
+  sandboxes).
+
 - **Tweak blocked-agent alerts.** Revisit blocked-agent notifications (#5118, #5125, #5135), including stopping
   Notifications bell notices immediately when **Agent is blocked** is toggled off, along with other adjustments the
-  maintainer has in mind.
+  maintainer has in mind. Plan: `plans/queue/blocked-notify-attention-and-debounce.md`.
 
 - **Let an agent that adds a host start YOLO sessions on it.** We need to make it practical for an agent that adds a
   host to be granted permissions to then start YOLO sessions on it. Details TBD. Circumstances that prompted this: an
