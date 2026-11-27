@@ -1025,8 +1025,9 @@ mod tests {
     }
 
     /// The Claude Code 2.1.241 `SessionStart` payload, verbatim from the
-    /// hand-verified vendor audit (re-run by `real_agent_capture.rs`'s
-    /// ignored hook tests).
+    /// hand-verified vendor audit (its shape is exercised live by the
+    /// ignored tests under `tests/e2e/real_agent_capture`, the drift suite
+    /// included).
     const CLAUDE_PAYLOAD: &str = r#"{"session_id":"6af192d4-0000-4000-8000-000000000000","transcript_path":"/home/u/.claude/projects/x/6af192d4.jsonl","cwd":"/home/u/src","hook_event_name":"SessionStart","source":"startup"}"#;
 
     /// The source-less Stop shape observed in Claude Code 2.1.310, with
@@ -1036,8 +1037,9 @@ mod tests {
     const CLAUDE_STOP_PAYLOAD: &str = r#"{"session_id":"6af192d4-0000-4000-8000-000000000000","transcript_path":"/tmp/claude/transcript.jsonl","cwd":"/tmp/project","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"DONE"}"#;
 
     /// The Codex CLI 0.149.1 `SessionStart` payload, verbatim from the
-    /// hand-verified vendor audit (re-run by `real_agent_capture.rs`'s
-    /// ignored hook tests). It carries two fields Claude's does not.
+    /// hand-verified vendor audit (its shape is exercised live by the drift
+    /// suite under `tests/e2e/real_agent_capture/drift/`). It carries two
+    /// fields Claude's does not.
     const CODEX_PAYLOAD: &str = r#"{"session_id":"0198d3ac-0000-7000-8000-000000000000","transcript_path":"/home/u/.codex/sessions/x.jsonl","cwd":"/home/u/src","hook_event_name":"SessionStart","model":"gpt-5-codex","permission_mode":"default","source":"startup"}"#;
 
     /// Muse Code 1.4.14's parent callback shapes, with a fixture working

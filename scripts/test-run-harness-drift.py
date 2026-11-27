@@ -41,7 +41,7 @@ class DriftRunnerTests(unittest.TestCase):
             "executable": "/synthetic/custom/target/debug/deps/e2e-test",
         }
         listing = (
-            "real_agent_capture::real_claude_session_reports_its_identity_across_clear: test\n"
+            "real_agent_capture::real_claude_shelled_out_child_cannot_replace_the_session_conversation: test\n"
             "real_agent_capture::drift::tests::a_drift_unit_test: test\n"
             "real_agent_capture::drift::base::drift_codex: test\n"
             "real_agent_capture::drift::base::drift_antigravity: test\n"
