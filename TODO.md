@@ -31,6 +31,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit pinning New terminal at the right end of the session's tab area.** On 2026-11-27 the landing monitor,
+  landing `terminal-tab-hover-close` (#5096), blocked it because pressing `+` (New terminal) twice without moving the
+  pointer pressed the new tab's close button the second time (the new tab's left slot lands where `+` was), and answered
+  the block on your behalf: `+` stays at the right end of the space the tabs can use, just left of the tunnel pill, so
+  adding a tab never moves it. With few tabs open it sits away from them, with empty space between. The alternatives
+  were putting `+` left of the shell tabs (beside the first tab's close slot), disarming a new tab's close button until
+  the pointer leaves it, or landing as built. Plan: `plans/queue/terminal-tab-hover-close.md`.
+
 - **Revisit asking the YOLO question on hosts whose supervisor reports no installation identity.** On 2026-11-26 the
   landing monitor, landing `launcher-consent-and-custom-agent-fixes` (#4999, #5003, #5029, #5037), blocked it because
   its YOLO fix stopped the launcher from asking the YOLO question at all on such hosts, and answered the block on your
