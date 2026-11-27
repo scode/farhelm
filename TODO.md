@@ -71,14 +71,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
-- **Reject flag-like values for CLI `--effort`.** PR #4954 (`agent-catalog-cli-and-drift-cleanups`) added
-  `allow_hyphen_values = true` to `--effort` on `LaunchFlags` (`crates/farhelm/src/main.rs`) so hyphen-prefixed custom
-  effort values like `--effort -fast` work as a separate argument without `--effort=-fast`. The side effect is that a
-  mistyped command missing its value (for example `--effort --yolo`) now consumes `--yolo` as the literal effort string
-  instead of failing to parse; built-in agents reject unknown efforts in the helm, but custom agents silently launch
-  with `--yolo` as their effort. Reject flag-like values for `--effort`, update `SPEC_impl.md` and CLI parse tests, and
-  check whether `--model` should follow the same rule. Plan: `plans/queue/cli-effort-reject-flag-values.md`.
-
 - **Investigate and remove the legacy `POST /api/sandbox-sessions` endpoint.** `POST /api/sandbox-sessions`
   (`create_sandbox_session` in `crates/farhelm-helm/src/sessions/sandbox.rs`, mounted in
   `crates/farhelm-helm/src/lib.rs`) is the pre-Podman Tensorlake-only spelling of `POST /api/environment-sessions`: it
