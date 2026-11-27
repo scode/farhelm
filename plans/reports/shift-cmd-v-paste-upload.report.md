@@ -112,3 +112,71 @@ passed after three rounds:
   cited the wrong run id for the screenshot comparison (the corrected id is the one above), and a docs sentence about
   files on Linux needed a qualifier. Neither touched code, so the docs build was the check rerun for them, and no fourth
   round was run.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained only queue bookkeeping. In the same round, just before it, the
+plan shift-cmd-click-copy-file landed: Shift-Cmd-click (Shift-Ctrl-click on Linux) on a file path in the terminal copies
+the file's contents into the clipboard. Both change the desktop app's terminal, SPEC.md and the "Work in a session" docs
+page, but they meet nowhere: that plan's gesture is a mouse click on a file path, this one is a key chord, and no code
+one plan changed is used by the other. Neither chord, Cmd+Shift+V on a Mac or Ctrl+Alt+V on Linux, is bound to anything
+else in Farhelm; on Linux, Ctrl+Alt+V stays apart from Ctrl+Shift+V paste and the Ctrl+Shift app shortcuts. Their
+SPEC.md and docs paragraphs agree with each other. From reading the code, the two also work together as one would
+expect: text a copy click puts on the clipboard is what this chord uploads.
+
+An independent reviewer and I read the change and found nothing to fix. Reusing the existing upload path keeps it small,
+and the test that holds the chord down checks, at the moment a key repeat would fire, that no second upload starts.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** This plan and the copy plan each removed a TODO entry next to the other's, so stacking them
+  conflicted there. I removed both entries, which is what both plans asked for; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing I found. The landing's checks were wider than the report's: they ran every test of the GUI crate and the desktop
+app, not only the terminal, shortcuts, menu and keymap tests, together with the copy plan's changes.
+
+#### Worth knowing
+
+- **SPEC.md's refusal rule has the exception the report describes.** SPEC.md says a terminal that is not connected
+  refuses the chord visibly. Behind the "Session unavailable" card, the chord does nothing and shows nothing, as the
+  report's first item under "Things you should know" explains; SPEC.md does not mention that exception. If you keep the
+  behavior, a follow-up could add it to SPEC.md.
+- **The chord is spelled two ways.** SPEC.md writes Shift+Cmd+V; the docs pages, the changelog entry and the Keyboard
+  shortcuts dialog write it with Cmd first (Cmd+Shift+V, ⌘+Shift+V). The Mac menu shows ⇧⌘V, as macOS draws every chord.
+  Only SPEC.md's written spelling puts Shift first. It is harmless; I recommend leaving it unless you want one spelling
+  everywhere.
+- **Not tried on a Mac.** The Mac menu item, the Mac chord and uploading only once while the chord is held are covered
+  by tests that set the platform themselves, and the held-chord rule uses the same mechanism that already keeps a held
+  Cmd+M (Minimize) from repeating on a Mac, but no Mac ran them.
+
+#### Checks
+
+Run once, on both of the round's plans stacked on main as it stood when the landing started (shift-cmd-click-copy-file,
+then shift-cmd-v-paste-upload), so each plan's code was tested together with the other's. The SSH test worker was still
+unreachable, as in the previous two rounds, so the slow suites ran on a boat sandbox (an x86_64 Ubuntu 24.04 VM), and
+clippy ran locally:
+
+- Locally, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+  `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`, all with `-D warnings`: clean.
+- On a boat, every test of the helm client (which the copy plan changed), the GUI crate and the desktop app (built once
+  for `-p farhelm-helm-client -p farhelm-gui -p farhelm-desktop` and run through the recorder), recorded run
+  bf7906bf-b4f3-4cdc-a81e-ad8ee912dd6b: 3,846 passed, 4 skipped (tests marked ignored), and no test that quietly passed
+  for lack of systemd or SSH on the machine. That is wider than either executor's selection.
+- On a boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  26fb6b9d-b461-481f-87f4-30b46b24ab50: 49 steps passed, with the paste step skipped as on every Linux run, so it says
+  nothing about the clipboard; it covers the terminal, its keys and the Keyboard shortcuts overview around them.
+- Locally, the full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run
+  49fe77c7-3619-45d7-983b-16dc390362d0, and the test that checks the list of screens the screenshot comparison draws,
+  recorded run 2364f0f1-04d5-4eb0-8e2b-1ceee283c607: passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format`, `dprint check` on the changed Markdown, and the docs website build
+  (`bun run build`, which checks every link): passed.
+
+Reused: nothing. Skipped: the other crates' tests and the supervisor's end-to-end suite, since neither plan changes the
+helm, the supervisor or the protocol; any run on a Mac, since none was available to the landing, so the Mac menu item
+and holding the chord down (shift-cmd-v-paste-upload) are covered only by tests that set the platform themselves, and an
+image reaching the real Mac clipboard (shift-cmd-click-copy-file) is untested.

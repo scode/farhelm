@@ -3,3 +3,4 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`shift-cmd-click-copy-file`](reports/shift-cmd-click-copy-file.report.md) landed 2026-11-27 in #5121, #5124: Add Shift-Cmd-click (Linux: Shift-Ctrl-click) on terminal file links to copy UTF-8 text or macOS image contents to the clipboard
+- [`shift-cmd-v-paste-upload`](reports/shift-cmd-v-paste-upload.report.md) landed 2026-11-27 in #5123: Add Shift-Cmd-V (Linux: Ctrl-Alt-V) to upload clipboard text via per-session attachments and paste the host path into the terminal
