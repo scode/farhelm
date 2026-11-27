@@ -62,7 +62,8 @@ async fn check_base_session(env: &DriftEnv<'_>, profile: &Harness, id: &str) -> 
     let mut first = Terminal::attach(sup, client, id, false).await?;
     first.ready(profile, trust, false).await?;
     let Some(hook_witness) = profile.hook_witness else {
-        return untracked_turn(&mut first).await;
+        // No turn has succeeded yet, so a login screen before the reply is still COULD NOT RUN.
+        return untracked_turn(&mut first, false).await;
     };
     let random = uuid::Uuid::new_v4().simple().to_string();
     let code_word = format!("FH{}", random[..8].to_ascii_uppercase());
@@ -126,20 +127,6 @@ async fn check_base_session(env: &DriftEnv<'_>, profile: &Harness, id: &str) -> 
     send_prompt(&mut second, RECALL_PROMPT, expected.reply, true).await?;
     wait_for_turn(&mut second, sup, id, &hook_log, &expected).await?;
     Ok(())
-}
-
-/// One short no-tools turn for an agent with no conversation report, proving that an interactive turn works under
-/// Farhelm's terminal host and not only that the CLI starts. The answer is split in the prompt ("FH" and a random
-/// nonce, joined only in the reply) so a wrapped prompt echo can never read as the answer, and the prompt is short:
-/// `Terminal::type_text` waits for the whole prompt on one screen line, and OpenCode's composer wraps well before the
-/// terminal's width. A login screen before the reply is still COULD NOT RUN, since no turn has succeeded yet.
-async fn untracked_turn(terminal: &mut Terminal<'_>) -> DriftResult {
-    let random = uuid::Uuid::new_v4().simple().to_string();
-    let nonce = &random[..8];
-    let reply = format!("FH{nonce}");
-    let prompt = format!("Reply FH then {nonce}, no space. No tools.");
-    send_prompt(terminal, &prompt, &reply, false).await?;
-    wait_for_reply(terminal, &reply, false).await
 }
 
 // ---- Codex's command process tree --------------------------------------------------------------------------------

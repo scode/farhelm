@@ -230,6 +230,22 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
     })
 }
 
+/// The profile's ordinary launch: its model, effort and workspace-trust choice, with the agent's default permissions.
+/// A category that needs nothing else from the launcher starts from this.
+fn ordinary_selection(harness: LaunchHarness, profile: &Harness) -> LaunchSelection {
+    LaunchSelection {
+        custom_agent: None,
+        harness,
+        model: profile.model.map(str::to_owned),
+        effort: profile.effort.map(Into::into),
+        permissions: None,
+        permission_flags: None,
+        wrapper_prefix: None,
+        container: None,
+        workspace_trust: profile.trust_at_launch.then_some(true),
+    }
+}
+
 /// A visible login or credential error, as opposed to a CLI rejecting Farhelm's argv.
 fn auth_block(text: &str) -> Option<&'static str> {
     [
@@ -809,6 +825,29 @@ async fn wait_for_reply(terminal: &mut Terminal<'_>, reply: &str, turned: bool) 
     })
 }
 
+/// A short no-tools prompt and the one-word reply it asks for. The answer is split in the prompt ("FH" and a random
+/// nonce, joined only in the reply) so a wrapped prompt echo can never read as the answer, and the prompt is short:
+/// `Terminal::type_text` waits for the whole prompt on one screen line, and OpenCode's composer wraps well before the
+/// terminal's width.
+fn split_nonce_prompt() -> (String, String) {
+    let random = uuid::Uuid::new_v4().simple().to_string();
+    let nonce = &random[..8];
+    (
+        format!("Reply FH then {nonce}, no space. No tools."),
+        format!("FH{nonce}"),
+    )
+}
+
+/// One short no-tools turn judged by its rendered reply alone, for a launch with no hook report to wait for (an agent
+/// Farhelm does not track, or an agent run outside Farhelm). It proves that an interactive turn works, not only that
+/// the CLI starts. `turned` says whether this case already saw a successful turn, which decides whether a login screen
+/// before the reply is COULD NOT RUN or a failure (`refusal`).
+async fn untracked_turn(terminal: &mut Terminal<'_>, turned: bool) -> DriftResult {
+    let (prompt, reply) = split_nonce_prompt();
+    send_prompt(terminal, &prompt, &reply, turned).await?;
+    wait_for_reply(terminal, &reply, turned).await
+}
+
 /// Read `/proc/<child>/<file>` of the owned CLI child, refusing the read if the host's pinned child (checked against
 /// its kernel start identity) changed while it ran, so the bytes always belong to the process the host tracks.
 fn read_child_proc(term: &Terminal<'_>, file: &str) -> anyhow::Result<Vec<u8>> {
@@ -837,6 +876,39 @@ fn check_child_words(term: &Terminal<'_>, file: &str, words: &[&str]) -> anyhow:
                 .all(|(actual, expected)| *actual == expected.as_bytes())
         }),
         "the owned CLI child did not receive the expected {file} words"
+    );
+    Ok(())
+}
+
+/// What an agent's hook prints back to the agent as its protocol answer, which the agent must consume without
+/// rendering. The text prompts these cases send never ask for it, so seeing it on screen means it leaked.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn hook_protocol_reply(harness: LaunchHarness) -> Option<&'static str> {
+    use LaunchHarness::*;
+    match harness {
+        // Antigravity's hook answers on stdout with `{}`.
+        Antigravity => Some("{}"),
+        Claude | Codex | Goose | Grok | Muse | Pi | Omp | Cursor | OpenCode | Bash | Zsh
+        | Custom => None,
+    }
+}
+
+/// No hook output reached the terminal: neither Farhelm's own hook diagnostics nor the agent's protocol reply. The
+/// retained replay and live output are checked as well as the current screen, because a redraw can erase output that
+/// leaked earlier. A vendor's own notice that a hook failed, in words that do not quote Farhelm's, is not detected.
+fn hook_invisible(harness: LaunchHarness, term: &Terminal<'_>) -> anyhow::Result<()> {
+    let leaked = |text: &str| {
+        text.contains("farhelm: when the user writes")
+            || text.contains("farhelm internal hook")
+            || text.contains("farhelm: hook")
+            || hook_protocol_reply(harness).is_some_and(|reply| text.contains(reply))
+    };
+    anyhow::ensure!(
+        !leaked(&term.host.screen_tail(SCREEN_BYTES))
+            && !leaked(&String::from_utf8_lossy(&term.replay_tail))
+            && !leaked(&term.output.text()),
+        "hook output reached the rendered terminal\n{}",
+        term.diagnostics()
     );
     Ok(())
 }
@@ -1026,6 +1098,40 @@ impl DriftEnv<'_> {
         }
         extras.setup_persistent_hooks =
             self.harness.agent_kind().offers_persistent_hooks() && self.private.is_some();
+        self.create_and_check(launch, extras, async |id| {
+            if let Some(private) = self.private {
+                private.check_hook_setup(self.installs_hooks)?;
+            }
+            check(id).await
+        })
+        .await
+    }
+
+    /// Start a command launch with no agent type, as a user's own shell command would run, in the same workspace and
+    /// with the same cleanup accounting as [`Self::with_session`]. It skips what only an agent launch has: the
+    /// harness match, the consent to set up persistent hooks (nothing is installed for it) and the hook setup check.
+    /// The supervisor's launch environment still applies, so the command starts with the mirror's variables set.
+    async fn with_plain_session<T>(
+        &self,
+        command: String,
+        check: impl AsyncFnOnce(&str) -> Result<T, DriftError>,
+    ) -> Result<T, DriftError> {
+        self.create_and_check(
+            farhelm_proto::SessionLaunch::plain_command(command),
+            farhelm_helm::CreateExtras::default(),
+            check,
+        )
+        .await
+    }
+
+    /// Create the session and run `check` on it, then Delete it whatever the check did. The create is counted before
+    /// it is sent, so a create that fails without returning an ID still keeps the mirror's copy-back unconfirmed.
+    async fn create_and_check<T>(
+        &self,
+        launch: farhelm_proto::SessionLaunch,
+        extras: farhelm_helm::CreateExtras,
+        check: impl AsyncFnOnce(&str) -> Result<T, DriftError>,
+    ) -> Result<T, DriftError> {
         self.session_cleanup.begin_create();
         let session = self
             .client
@@ -1039,15 +1145,7 @@ impl DriftEnv<'_> {
             )
             .await?;
         self.session_cleanup
-            .check_and_delete(
-                async {
-                    if let Some(private) = self.private {
-                        private.check_hook_setup(self.installs_hooks)?;
-                    }
-                    check(&session.id).await
-                },
-                self.client.delete_session(&session.id),
-            )
+            .check_and_delete(check(&session.id), self.client.delete_session(&session.id))
             .await
     }
 }
@@ -1281,6 +1379,7 @@ mod instructions_delivery;
 mod model_selection;
 mod named_conversation;
 mod permission_modes;
+mod persistent_hooks;
 mod reasoning_effort;
 mod workspace_trust;
 

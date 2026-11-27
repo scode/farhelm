@@ -11,21 +11,6 @@ use super::*;
 /// The short idle observation catches a report produced at startup when the vendor owes one only after a prompt.
 const BEFORE_PROMPT: Duration = Duration::from_secs(3);
 
-/// Use the same known test model and workspace-trust choices as the base drift checks.
-fn selection(harness: LaunchHarness, profile: &Harness) -> LaunchSelection {
-    LaunchSelection {
-        custom_agent: None,
-        harness,
-        model: profile.model.map(str::to_owned),
-        effort: profile.effort.map(Into::into),
-        permissions: None,
-        permission_flags: None,
-        wrapper_prefix: None,
-        container: None,
-        workspace_trust: profile.trust_at_launch.then_some(true),
-    }
-}
-
 /// Look for early Resume while the composer waits for input. A pending locator can be stored before the agent
 /// has persisted any conversation to reopen. With hooks off, even a pending report is unexpected.
 async fn early_capture(
@@ -127,11 +112,10 @@ async fn submit(term: &mut Terminal<'_>, log: &Path) -> Result<(String, String),
     Ok((format!("FH{nonce}"), baseline))
 }
 
-/// The checks this category makes for some harnesses only, beyond the steps every harness shares.
+/// The checks this category makes for some harnesses only, beyond the steps every harness shares. (The hook's
+/// protocol reply, which must never reach the screen, is shared with other categories: `hook_protocol_reply`.)
 #[derive(Clone, Copy)]
 struct HarnessChecks {
-    /// A protocol reply the hook prints to the agent, which must never reach the screen.
-    hook_reply: Option<&'static str>,
     /// The reported conversation file starts with OMP's title slot, whose width and parsing are checked.
     title_slot_prelude: bool,
     /// Words the agent's process must still carry when hooks are off.
@@ -150,18 +134,12 @@ struct HarnessChecks {
 fn checks(harness: LaunchHarness) -> HarnessChecks {
     use LaunchHarness::*;
     let none = HarnessChecks {
-        hook_reply: None,
         title_slot_prelude: false,
         hooks_off_child_words: &[],
         hooks_off_resume: false,
         restart_before_prompt: false,
     };
     match harness {
-        // Antigravity's hook answers on stdout with `{}`, which the CLI must consume without rendering.
-        Antigravity => HarnessChecks {
-            hook_reply: Some("{}"),
-            ..none
-        },
         Omp => HarnessChecks {
             title_slot_prelude: true,
             ..none
@@ -182,7 +160,7 @@ fn checks(harness: LaunchHarness) -> HarnessChecks {
             restart_before_prompt: true,
             ..none
         },
-        Muse | Grok | Pi | Cursor | OpenCode | Bash | Zsh | Custom => none,
+        Antigravity | Muse | Grok | Pi | Cursor | OpenCode | Bash | Zsh | Custom => none,
     }
 }
 
@@ -204,27 +182,6 @@ fn expectation(reply: &str, hook_witness: HookWitness) -> TurnExpectation<'_> {
         original_argv: None,
         hook_witness,
     }
-}
-
-/// Check retained terminal text as well as the current screen because a redraw can erase leaked output.
-/// Antigravity must consume its protocol response without rendering it. The text prompt never asks for JSON.
-fn hook_invisible(harness: LaunchHarness, term: &Terminal<'_>) -> anyhow::Result<()> {
-    let leaked = |text: &str| {
-        text.contains("farhelm: when the user writes")
-            || text.contains("farhelm internal hook")
-            || text.contains("farhelm: hook")
-            || checks(harness)
-                .hook_reply
-                .is_some_and(|reply| text.contains(reply))
-    };
-    anyhow::ensure!(
-        !leaked(&term.host.screen_tail(SCREEN_BYTES))
-            && !leaked(&String::from_utf8_lossy(&term.replay_tail))
-            && !leaked(&term.output.text()),
-        "hook output reached the rendered terminal\n{}",
-        term.diagnostics()
-    );
-    Ok(())
 }
 
 /// Read only the bounded prefix of the reported file. Verify width and parser acceptance on the same bytes even
@@ -483,7 +440,7 @@ async fn enabled(
         .expect("the harness reports a conversation");
     with_drift_supervisor(
         profile,
-        selection(harness, profile),
+        ordinary_selection(harness, profile),
         None,
         async |env, launch| {
             env.with_session(launch, farhelm_helm::CreateExtras::default(), async |id| {
@@ -695,7 +652,7 @@ async fn disabled(harness: LaunchHarness, profile: &Harness, capture: Option<&st
         .expect("the harness reports a conversation");
     with_drift_supervisor_hooks(
         profile,
-        selection(harness, profile),
+        ordinary_selection(harness, profile),
         None,
         AgentHooks::None,
         async |env, launch| {

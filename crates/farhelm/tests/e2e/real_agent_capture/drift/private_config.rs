@@ -647,11 +647,20 @@ impl PrivateConfig {
                 Root::GrokHome => seams.grok_home = Some(mirror.private.clone()),
                 Root::ClaudeConfigDir => {}
             }
-            seams.launch_env.push((
-                mirror.root.variable().into(),
-                mirror.private.to_string_lossy().into_owned(),
-            ));
         }
+        seams.launch_env.extend(
+            self.redirects()
+                .map(|(variable, path)| (variable.into(), path.to_string_lossy().into_owned())),
+        );
+    }
+
+    /// Each variable that points the agent at a mirror, with the mirror's path: what `apply` puts in the
+    /// supervisor's launch environment, and what a launch that sets its own environment must set again to read the
+    /// same mirror.
+    pub(super) fn redirects(&self) -> impl Iterator<Item = (&'static str, &Path)> {
+        self.mirrors
+            .iter()
+            .map(|mirror| (mirror.root.variable(), mirror.private.as_path()))
     }
 
     /// The fixture starts with all planned hook paths private and empty. A consented launch either installs every

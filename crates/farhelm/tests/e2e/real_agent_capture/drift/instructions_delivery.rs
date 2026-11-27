@@ -48,17 +48,7 @@ async fn check_instruction_policy(
     instructions: AgentInstructions,
     reply: &str,
 ) -> DriftResult {
-    let selection = LaunchSelection {
-        custom_agent: None,
-        harness,
-        model: profile.model.map(str::to_owned),
-        effort: profile.effort.map(Into::into),
-        permissions: None,
-        permission_flags: None,
-        wrapper_prefix: None,
-        container: None,
-        workspace_trust: profile.trust_at_launch.then_some(true),
-    };
+    let selection = ordinary_selection(harness, profile);
     let seams = SupervisorSeams {
         agent_instructions: instructions,
         ..Default::default()
