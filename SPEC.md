@@ -2549,11 +2549,16 @@ tab close's retry across a supervisor restart.
 Each shell tab's close button sits at its left, in a slot that otherwise shows a terminal mark, so none sits beside New
 terminal. It shows while the pointer is over the tab, keyboard focus is on the tab or the button, the tab's close
 confirmation is open, or its close is in flight, and nothing in the strip moves when it does. Tab reaches it right after
-its tab even while it is not shown. The main terminal's tab has neither mark nor close button. New terminal stays at the
-right end of the tab strip however many tabs are open, so adding a tab never moves it and a second press at the same
-spot opens another tab rather than reaching the new tab's close button; only the tabs before it scroll. A strip too
-narrow to show New terminal and a control's width of its tabs (a 650px pane beside a tunnel pill, say) puts New terminal
-after the last tab instead, scrolling with them, so that the tabs stay reachable.
+its tab even while it is not shown. The main terminal's tab has neither mark nor close button, and stays at the left end
+of the tab strip however far the shell tabs scroll, so the main terminal is always one press away. New terminal stays at
+the right end of the tab strip however many tabs are open, so adding a tab never moves it and a second press at the same
+spot opens another tab rather than reaching the new tab's close button; only the shell tabs between the two scroll. A
+strip too narrow to show the main tab, New terminal and a control's width of shell tabs (a 650px pane beside a tunnel
+pill, say) puts the main tab before the first shell tab and New terminal after the last instead, scrolling with them, so
+that every tab stays reachable. However a tab becomes the shown one (a press, a shortcut, New terminal, the fallback
+after a close, or the remembered tab restored), the strip scrolls it into view, once: scrolling the strip afterwards is
+not undone, unless the strip's width changes which of its tabs stay put (a tunnel pill appearing beside it, say), when
+it scrolls the shown tab into view again.
 
 Closing the active shell tab, including when its shell exits or another client closes it, selects the nearest surviving
 tab to its left in opening order. The main terminal takes over when there is no earlier tab. Closing a tab that is

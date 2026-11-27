@@ -1894,6 +1894,255 @@ fn a_tab_keyboard_focus_reaches_is_scrolled_into_view(cx: &mut TestAppContext) {
     );
 }
 
+// ---- The pinned main tab and the chosen tab's reveal ---------------------------------------------------------------
+
+/// Whether the element `id` in `nodes` is drawn under the element `ancestor`, by the frame's own parent links: which
+/// part of the strip holds a control, the scrolling part ([`super::STRIP_TABS_ID`]) or a pinned end.
+fn drawn_under(nodes: &[gpui::DriverNode], id: &str, ancestor: &str) -> bool {
+    let Some(mut at) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+    else {
+        panic!("{id} was not drawn");
+    };
+    while let Some(parent) = nodes[at].parent {
+        if nodes[parent].element_id.as_deref() == Some(ancestor) {
+            return true;
+        }
+        at = parent;
+    }
+    false
+}
+
+impl Window<'_> {
+    /// Whether the element `id` is drawn whole in a fresh frame: nothing of it clipped, as a tab the strip has scrolled
+    /// into view is, and at a real width.
+    fn drawn_whole(&mut self, id: &str) -> bool {
+        test_support::frame(self.cx)
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .is_some_and(|node| {
+                node.visible_bounds == node.bounds && node.bounds.size.width > gpui::px(0.)
+            })
+    }
+
+    /// Turn the wheel over the strip far enough to bring it back to its start, as a user scrolling away from the
+    /// chosen tab would, and draw twice, so a reveal still pending would have had its frame to pull the strip back.
+    fn wheel_strip_to_start(&mut self) {
+        let strip = self.cx.debug_bounds(STRIP_ID).expect("the strip is drawn");
+        self.cx.simulate_event(gpui::ScrollEvent {
+            position: strip.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(20000.), gpui::px(0.))),
+            ..Default::default()
+        });
+        test_support::redraw(self.cx);
+        test_support::redraw(self.cx);
+    }
+}
+
+/// The maintainer chose to pin the main tab so the main terminal stays one press away however many shell tabs are open
+/// (the overflowing-tabs plan's decision); a main tab that scrolled with the shell tabs went out of view as soon as the
+/// user reached a tab near the end. Specified: with 35 tabs, once Terminal 35 is chosen (so the strip has scrolled to
+/// its end, the premise: Terminal 35 drawn whole and Terminal 1 not), the main tab is still drawn whole, at the strip's
+/// left edge and outside the scrolling part (Terminal 35 is inside it, New terminal outside), and a press on the main
+/// tab shows the agent terminal.
+#[gpui::test]
+fn the_main_tab_stays_pinned_while_the_shell_tabs_scroll(cx: &mut TestAppContext) {
+    let ids: Vec<String> = (1..=35).map(|n| format!("t{n}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let set = window.set();
+    window.cx.update(|w, cx| {
+        let mark = Mark::take(cx);
+        set.update(cx, |set, cx| {
+            set.choose(Some("t35".to_owned()), &mark, w, cx)
+        });
+    });
+    assert!(
+        window.drawn_whole(&tab_element_id("t35")) && !window.drawn_whole(T1_TAB),
+        "the premise: the strip scrolled to Terminal 35, Terminal 1 out of view"
+    );
+    assert!(window.drawn_whole(AGENT_TAB_ID), "the main tab is in view");
+    let nodes = test_support::frame(window.cx);
+    let strip = test_support::bounds(window.cx, STRIP_ID);
+    let agent = test_support::bounds(window.cx, AGENT_TAB_ID);
+    assert!(
+        (agent.left() - strip.left()).abs() < gpui::px(0.5),
+        "the main tab starts the strip: Agent {agent:?}, strip {strip:?}"
+    );
+    assert!(
+        !drawn_under(&nodes, AGENT_TAB_ID, super::STRIP_TABS_ID),
+        "the main tab is pinned"
+    );
+    assert!(
+        drawn_under(&nodes, &tab_element_id("t35"), super::STRIP_TABS_ID),
+        "a shell tab scrolls"
+    );
+    assert!(
+        !drawn_under(&nodes, super::ADD_ID, super::STRIP_TABS_ID),
+        "New terminal is pinned"
+    );
+
+    click(window.cx, AGENT_TAB_ID);
+    assert_eq!(
+        window.chosen(),
+        None,
+        "the pinned main tab still chooses the agent terminal"
+    );
+}
+
+/// A tab New terminal opens lands after every other tab, so in a strip that already overflows it would appear out of
+/// view, and the user would be typing into a shell whose tab they cannot see (TODO.md's "Overflowing terminal tabs go
+/// invisible"). Specified: with 20 tabs (the premise: Terminal 20 is clipped), a press on New terminal answered with
+/// t21, and the row then listing t1 to t21, t21 is chosen and its tab is drawn whole.
+#[gpui::test]
+fn a_tab_new_terminal_opens_is_scrolled_into_view(cx: &mut TestAppContext) {
+    let mut ids: Vec<String> = (1..=20).map(|n| format!("t{n}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    assert!(
+        !window.drawn_whole(&tab_element_id("t20")),
+        "the premise: the tabs overflow the strip"
+    );
+    tab_requests(&mut window.helm);
+
+    click(window.cx, super::ADD_ID);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "one open request");
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t21" } })));
+    settle(window.cx);
+    ids.push("t21".to_owned());
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    window.push_tabs(&refs);
+    assert_eq!(window.chosen().as_deref(), Some("t21"));
+    assert!(
+        window.drawn_whole(&tab_element_id("t21")),
+        "the new tab was scrolled into view"
+    );
+}
+
+/// When the shown tab goes (closed here or elsewhere, or reaped), its fallback becomes the shown terminal, and its tab
+/// must come into view, or the strip would show no tab as chosen. The reveal is spent once per choice, so a wheel turn
+/// after it is not pulled back. Specified: with 35 tabs and Terminal 35 chosen (the premise: drawn whole), a wheel turn
+/// back to the strip's start leaves Terminal 35 and Terminal 34 out of view over the next frames; once the row stops
+/// listing t35, t34 is chosen and drawn whole.
+#[gpui::test]
+fn a_close_fallback_is_scrolled_into_view_and_the_wheel_is_not_pulled_back(
+    cx: &mut TestAppContext,
+) {
+    let ids: Vec<String> = (1..=35).map(|n| format!("t{n}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let set = window.set();
+    window.cx.update(|w, cx| {
+        let mark = Mark::take(cx);
+        set.update(cx, |set, cx| {
+            set.choose(Some("t35".to_owned()), &mark, w, cx)
+        });
+    });
+    let (t34, t35) = (tab_element_id("t34"), tab_element_id("t35"));
+    assert!(
+        window.drawn_whole(&t35),
+        "the premise: the choice was revealed"
+    );
+
+    window.wheel_strip_to_start();
+    assert!(
+        !window.drawn_whole(&t35) && !window.drawn_whole(&t34),
+        "the wheel moved the strip, and the spent reveal did not pull it back"
+    );
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t35"),
+        "the premise: still chosen"
+    );
+
+    window.push_tabs(&refs[..34]);
+    assert_eq!(window.chosen().as_deref(), Some("t34"));
+    assert!(
+        window.drawn_whole(&t34),
+        "the fallback was scrolled into view"
+    );
+}
+
+/// Reopening a session shows the tab the user last chose (SPEC.md, "Session view"), which in a long strip sits far past
+/// what the new strip shows at its start; restoring it without bringing it into view would show a terminal whose tab
+/// the user cannot find. Specified: with 30 tabs (all attached) and Terminal 30 chosen, leaving for session b and
+/// coming back restores t30 (the premise); the new strip no longer shows Terminal 1 whole, so it scrolled away from its
+/// start, where Terminal 30 would be out of view; and Terminal 30's tab is drawn whole.
+#[gpui::test]
+fn a_restored_tab_is_scrolled_into_view(cx: &mut TestAppContext) {
+    let ids: Vec<String> = (1..=30).map(|n| format!("t{n}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let set = window.set();
+    window.cx.update(|w, cx| {
+        let mark = Mark::take(cx);
+        set.update(cx, |set, cx| {
+            set.choose(Some("t30".to_owned()), &mark, w, cx)
+        });
+    });
+    drop(set);
+    assert_eq!(
+        window.remembered().as_deref(),
+        Some("t30"),
+        "the premise: remembered"
+    );
+
+    click(window.cx, "session-row-b");
+    click(window.cx, "session-row-a");
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t30"),
+        "the premise: restored"
+    );
+    assert!(
+        !window.drawn_whole(T1_TAB),
+        "the new strip scrolled away from its start"
+    );
+    assert!(
+        window.drawn_whole(&tab_element_id("t30")),
+        "the restored tab was scrolled into view"
+    );
+}
+
+/// The width tiers decide which ends of the strip stay put, and they must leave every control reachable: pinning both
+/// ends in a strip that cannot also show a control's width of shell tabs would leave a focused tab nowhere to be
+/// scrolled into view (SPEC.md keeps the top row reachable down to a 650-pixel pane). Specified, for a main tab 50
+/// pixels wide: a strip not laid out yet (zero width) pins; with shell tabs, a strip exactly as wide as the main tab, a
+/// gap, a control's width of tabs and the pinned New terminal (115 pixels) pins and one a pixel narrower scrolls
+/// everything; without shell tabs, the main tab and New terminal alone (87 pixels) pin and a pixel less scrolls.
+#[test]
+fn the_strip_pins_its_ends_only_with_room_for_a_control_of_shell_tabs() {
+    use super::StripLayout::{self, Pinned, Scrolling};
+    let agent = gpui::px(50.);
+    let with_tabs = 50. + super::STRIP_GAP + super::PINNED_TABS_FLOOR + super::PINNED_ADD_WIDTH;
+    let without_tabs = 50. + super::PINNED_ADD_WIDTH;
+    assert_eq!(
+        (with_tabs, without_tabs),
+        (115., 87.),
+        "the premise: the widths named"
+    );
+    assert_eq!(StripLayout::at(gpui::px(0.), agent, true), Pinned);
+    assert_eq!(StripLayout::at(gpui::px(with_tabs), agent, true), Pinned);
+    assert_eq!(
+        StripLayout::at(gpui::px(with_tabs - 1.), agent, true),
+        Scrolling
+    );
+    assert_eq!(
+        StripLayout::at(gpui::px(without_tabs), agent, false),
+        Pinned
+    );
+    assert_eq!(
+        StripLayout::at(gpui::px(without_tabs - 1.), agent, false),
+        Scrolling
+    );
+}
+
 /// Tunnels belong to the session (SPEC.md: the top row's pill lists the session's tunnels), so a tunnel a tab opens
 /// must show in the pill, which reads the agent terminal's list, and a remote session's tabs must not each read the
 /// list again. Specified: every tab's terminal uses the agent terminal's tunnel list.
@@ -3138,17 +3387,9 @@ fn the_close_chord_scrolls_an_off_screen_tab_into_view_before_asking(cx: &mut Te
             set.choose(Some("t35".to_owned()), &mark, w, cx)
         });
     });
+    // The choice's reveal is spent in this frame, so the wheel after it is not undone.
     test_support::redraw(window.cx);
-    let strip = window
-        .cx
-        .debug_bounds(STRIP_ID)
-        .expect("the strip is drawn");
-    window.cx.simulate_event(gpui::ScrollEvent {
-        position: strip.center(),
-        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(20000.), gpui::px(0.))),
-        ..Default::default()
-    });
-    test_support::redraw(window.cx);
+    window.wheel_strip_to_start();
     let close_whole = |window: &mut Window| {
         test_support::frame(window.cx)
             .iter()
