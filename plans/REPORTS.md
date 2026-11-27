@@ -6,3 +6,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`file-hover-too-large-hint`](reports/file-hover-too-large-hint.report.md) landed 2026-11-27 in #5162: Show "too large to copy contents" on terminal file hover cards over the 10 MB copy cap
 - [`agent-hosts-tailscale-column`](reports/agent-hosts-tailscale-column.report.md) landed 2026-11-27 in #5161: Add a TAILSCALE column to plain `farhelm agent hosts` table output
 - [`cli-flag-parsing-audit`](reports/cli-flag-parsing-audit.report.md) landed 2026-11-27 in #5163, #5165: Stop free-text CLI options and positionals from swallowing flags and clean up clap parsing quirks
+- [`drift-base-isolation-and-turns`](reports/drift-base-isolation-and-turns.report.md) landed 2026-11-27 in #5167, #5168: Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category

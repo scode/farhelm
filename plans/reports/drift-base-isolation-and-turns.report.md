@@ -134,3 +134,87 @@ Each PR had a fresh-context Opus 5.5 review at high effort, and #5168 had a seco
   that does not replace itself cannot read as a detached server; describe shell mode and the YOLO launch accurately; and
   refuse to start when the "Shell mode" cue is already on screen. Its three nits are applied. These last fixes were not
   reviewed again; runs `90bd06b4` and `532dce05` ran after them.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the command line's parsing changes (cli-flag-parsing-audit, #5163
+and #5165). The only `farhelm` command the drift tests' sessions run is the hook command the agents call, and its
+parsing is unaffected: its free-text option still accepts a value that starts with a dash, and the agent names it is
+given never start with one. In the same round, before this plan, terminal-tab-shortcuts landed (#5164, #5166: Cmd+T and
+Cmd+W for shell tabs, desktop app only), and after it drift-permission-footer (#5169: Guarded permission footers in the
+drift tests). The two drift plans share only the drift docs page and TODO.md; both pages' changes are kept.
+drift-permission-footer's Cursor case should get past Cursor's trust dialog thanks to this plan's fix to the shared
+trust answering (see that plan's landing notes).
+
+An independent reviewer and I read the change and found nothing to fix. The checks tell the outcomes apart: the answer a
+turn waits for cannot be matched by the echo of the prompt, and the Codex ancestry check matches processes by id and
+start time and refuses a chain that stops short. The tests change no environment variables of the test process and every
+wait is bounded. Their own code writes nothing to the real home directory, though the extra Codex session uses the real
+Codex login and adds a session to Codex's own history there, as every drift case does.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's plans each removed their own TODO entries, and this plan also adds a Plan
+  follow-ups entry, so stacking them conflicted there. I kept main's TODO.md with each plan's own TODO change applied,
+  this plan's follow-up entry included; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing changed by the landing itself, but one attribution in the report is wrong: its last open question blames the
+clippy failure on main on the blocked-agent notification work (#5125, #5135). It came from the change that made the helm
+poll each host's session list every 30 seconds (#5120), which left the old ntfy settings save method used only by tests.
+
+#### Worth knowing
+
+- **One reason in the report and the new TODO entry may be wrong.** The report says a `--no-daemon`-only check needs an
+  answer to Codex's own trust dialog, "which the drift tests cannot do today", and the Plan follow-ups entry says a
+  `--no-daemon`-only check needs an answer to Codex's workspace trust dialog, which "the drift trust answerer does not
+  recognise today". The reviewer found that the captured screen of that dialog from an older Codex (0.159.0) does match
+  the answerer's rules. The documented reason the tests trust Codex at launch instead is that its dialog can lose
+  keystrokes. The reviewer did not check the newer dialog (0.172.0) the live runs met, so the reason may still hold
+  there; whoever picks it up should check first.
+- **The live runs predate the landing.** As the report says, only the `base` cases of Codex, Cursor and OpenCode ran
+  live, before the landing. The landing ran none of the real-agent cases, which spend vendor turns (see Checks).
+
+#### Checks
+
+Run once, on the round's three plans stacked on main as it stood when the landing started (terminal-tab-shortcuts, then
+drift-base-isolation-and-turns, then drift-permission-footer), so each was tested with the others and with the earlier
+changes above. The desktop plan got the desktop app's tests, screenshots and end-to-end smoke test. The drift plans'
+real-agent cases are opt-in and spend vendor turns, so they were built and listed, not run, and the ordinary tests of
+the drift code and of the supervisor's footer reading ran instead. The SSH test worker was unreachable, so the smoke ran
+on a boat sandbox (an x86_64 Ubuntu 24.04 VM), and the rest ran locally:
+
+- `cargo clippy --all-targets`, and `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`
+  (the build with the desktop app's test-automation hooks): each reported one warning and nothing else. That warning is
+  the unused ntfy settings method in the helm, on main since #5120 and outside this round, which makes `-D warnings`
+  fail, so these ran without it. `cargo clippy -p farhelm-gui --all-targets -- -D warnings` (the desktop app's GUI
+  crate, which does not depend on the helm's code): clean.
+- The GUI crate's whole default test suite (`cargo nextest run -p farhelm-gui`), recorded run
+  790d4ebc-9b6a-46d4-b81b-12cdbc9a08f6: 3,603 passed, none failed, and it skipped its 4 opt-in tests, among them the
+  screenshot test the next item runs.
+- The full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run 9be720dc-7a79-40ae-b77a-eec843eafb24:
+  passed.
+- On a boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  94e567ef-c5b4-4bbd-9a83-c0bac7dd24de: 48 of its 49 steps passed, and the paste step was skipped, as on every Linux
+  run. Its steps include Delete from a session's menu; none presses Cmd+T or Cmd+W.
+- The supervisor's per-agent tests, the footer reader and its captured screens among them
+  (`cargo nextest run -p farhelm-supervisor --lib -E 'test(/agent_kind::/)'`), recorded run
+  7c2a5d10-f11a-46a9-a5d5-7ff23f798176: 112 passed, none failed.
+- The ordinary tests of the real-agent test code, without the opt-in cases
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/real_agent_capture/)'`), recorded run
+  56b688c2-75da-476f-baad-df4c39ca17a7: 50 passed, none failed, and no test reported that it skipped for a missing
+  system service. Listing the opt-in drift cases
+  (`cargo nextest list -p farhelm --test e2e --run-ignored only -E 'test(/real_agent_capture::drift::/)'`) built them
+  and found 71.
+- The docs website build (`bun run build` in `website/`): built. `python3 scripts/check-agents-md.py` for the drift
+  tests' docs page, which the instruction files point to: passed.
+- `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Not rerun: the drift plans' live runs against the real agents, described in their reports; the landing
+ran none, since they spend vendor turns, so the drift plans have not run live together. Skipped: the rest of the Rust
+workspace's tests, since nothing else changed; the other opt-in tests; and any run on a Mac, since none was available to
+the landing. No Mac ran Cmd+T or Cmd+W: the Mac's rule is covered only by the tests that pass the platform in.
