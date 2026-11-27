@@ -1297,17 +1297,17 @@ systemd or SSH substrate ran.
   automatic remote upgrade with continuity bound to the pre-relaunch receipt, attempt-local exports on deferral, and
   reopen continuity bound to a witnessed quit and fresh app process across guest, import and saved verdict checks,
   remote menu Remove/re-add and Uninstall sequencing, independent resource-preservation/removal receipts, restart
-  process handoffs, calibrated window measurements, gesture-trace and bonus gesture-readiness gates, failure gates and
-  evidence import with fictional fixtures, including the P0/P1/P2 tier order, scoped signed-announcement launch and
-  cleanup of a prepared untested Mac pair after scope narrows, announcement publication absence independent of feedback,
-  chain fences with recorded skips and stop scopes, independent P0 pairs, the three-stable historical upgrade cap, a
-  prerelease plan without an updater pair, stable discovery failure, explicit scope restoration with feedback consent,
-  refusal to continue runs planned under the earlier layout, and remote launcher visibility guidance. Use a substrate
-  that permits process-group inspection; Linux continuity cases skip on macOS. These tests prove harness contracts, not
-  native GUI behavior or a release pass. Actual native fixture probes and release checks retain their own private
-  evidence. The guest-only Swift geometry helper needs separate SDK type-check and read-only runtime validation in an
-  owned disposable guest; the portable suite does not exercise that OS API. It also checks retained permission blocks
-  and failure claims, release of fixtures with intact scoped evidence, and a seeded Linux menu-test baseline.
+  process handoffs, calibrated window gesture traces, bonus ordering with gestures after independent coverage, failure
+  gates and evidence import with fictional fixtures, including the P0/P1/P2 tier order, scoped signed-announcement
+  launch and cleanup of a prepared untested Mac pair after scope narrows, announcement publication absence independent
+  of feedback, chain fences with recorded skips and stop scopes, independent P0 pairs, the three-stable historical
+  upgrade cap, a prerelease plan without an updater pair, stable discovery failure, explicit scope restoration with
+  feedback consent, refusal to continue runs planned under the earlier layout, and remote launcher visibility guidance.
+  Use a substrate that permits process-group inspection; Linux continuity cases skip on macOS. These tests prove harness
+  contracts, not native GUI behavior or a release pass. Actual native fixture probes and release checks retain their own
+  private evidence. The guest-only Swift geometry helper needs separate SDK type-check and read-only runtime validation
+  in an owned disposable guest; the portable suite does not exercise that OS API. It also checks retained permission
+  blocks and failure claims, release of fixtures with intact scoped evidence, and a seeded Linux menu-test baseline.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, including v0.40.0's
   one-time notes policy section, the folded full list's PR coverage and the headline format for new finalized

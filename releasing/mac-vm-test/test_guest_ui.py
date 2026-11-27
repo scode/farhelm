@@ -140,7 +140,7 @@ checkpoint. A second Quit in that checkpoint could dismiss the running updater.
 
     def test_ax_only_menu_observation_cannot_reuse_an_earlier_image(self):
         """A successful menu observation may omit its image; retain it without borrowing stale calibration."""
-        self.task.update(check_id='native-preflight', pass_id='fresh')
+        self.task.update(check_id='window-drag', pass_id='fresh')
         ui = NativeUI(self.operations)
         self.operations.latest_images['finder'] = {'sequence': 1}
         response = {'result': {'content': [{'type': 'text', 'text': 'controlled menu AX state'}]}}

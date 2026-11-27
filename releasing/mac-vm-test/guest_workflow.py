@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 from control import Refused
 from guest_tester import request
-from checkpoint_contract import (announcements_instructions, is_bonus_pass, remote_host_instructions,
+from checkpoint_contract import (announcements_instructions, remote_host_instructions,
                                  update_instructions, window_instructions)
 
 
@@ -437,22 +437,6 @@ native input and ordinary window captures work.
         return update_instructions(check_id, pass_id, update_path)
     if check_id in ('remote-host-remove', 'remote-host-uninstall'):
         return remote_host_instructions(check_id, pass_id)
-    if check_id == 'native-preflight' and is_bonus_pass(pass_id):
-        return '''Call prerequisites. This bonus fixture needs native window gestures as well
-as screenshots, clicks and exact text. Bind Finder and establish exactly one
-normal file window using its native File > New Finder Window if needed;
-Desktop alone is not the oracle. Inspect AX before asking for an image. If a
-menu is open, dismiss it through its actual Cancel secondary action or an
-ordinary menu dismissal, and verify the standard window returned. Click an ordinary control,
-paste nonsecret text and verify its complete reactive value. Restore a normal
-window with empty title-bar background and room to move. Capture and call
-finder_frame, drag that background through the documented native drag API,
-capture and call finder_frame again. Require changed position with unchanged
-size on that same window; successful tool exit alone cannot prove delivery.
-Also double-click an unselected existing folder icon in Finder icon view and
-require navigation. Capture actual final native state. If either gesture is
-unsupported or has no effect, report could-not-run and stop before Farhelm
-installation. No product state, OS permissions or authentication changes.'''
     if check_id == 'p2-announcements':
         return announcements_instructions()
     contracts = {

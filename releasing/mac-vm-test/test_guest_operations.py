@@ -872,23 +872,15 @@ printf 'installer contract satisfied\\n'
         self.assertIn('window_frame', required_operations('window-drag', 'fresh', None))
         self.assertNotIn('window_frame', available_operations('app-start', 'fresh', None))
 
-    def test_bonus_readiness_checks_gestures_without_expanding_p0(self):
-        """A missing native gesture must be found before bonus installation, while P0 keeps its smaller prerequisites."""
-        bonus = managed_instructions('native-preflight', 'fresh')
-        self.assertIn('stop before Farhelm', bonus)
-        self.assertIn('double-click', bonus)
-        self.assertIn('finder_frame', required_operations('native-preflight', 'fresh', None))
-        self.assertNotIn('finder_frame', available_operations('native-preflight', 'p0-fresh', None))
-
-    def test_bonus_readiness_cannot_pass_on_command_success_without_motion(self):
-        """A reported pass and successful frame queries still need a measured same-window move."""
-        self.value.update(check_id='native-preflight', pass_id='fresh')
-        write_json(self.output / 'managed-operations.json', {
-            'completed': ['prerequisites', 'finder_frame'], 'receipts': [], 'continuity': None,
-            'observations': {}})
-        write_json(self.output / 'work/managed-window-frames.json', {'observations': []})
-        with self.assertRaisesRegex(TesterError, 'actual window-drag delivery'):
-            managed_result(self.value, self.output, {'status': 'pass', 'detail': 'fictional native success'})
+    def test_only_the_window_check_can_request_finder_geometry(self):
+        """A missing drag or Swift runtime must leave upgrades and the fresh baseline runnable."""
+        for pass_id in ('p0-fresh', 'fresh', 'upgrade-v0.29.0'):
+            with self.subTest(pass_id=pass_id):
+                self.assertEqual(required_operations('native-preflight', pass_id, None), {'prerequisites'})
+                self.assertNotIn('finder_frame', available_operations('native-preflight', pass_id, None))
+                text = managed_instructions('native-preflight', pass_id)
+                self.assertIn('paste nonsecret text', text)
+        self.assertIn('finder_frame', available_operations('window-drag', 'fresh', None))
 
     def test_conversation_pass_requires_a_captured_identity(self):
         """An actual answer alone must not satisfy the bonus promise that the conversation can later resume."""

@@ -229,14 +229,16 @@ fictional releases.
     p0.append(dict(old, id='p0-installer-upgrade', update_path='manual'))
     # The local candidate on the installer pair still sends feedback before
     # that pair is cleaned up. The next pair uses two Macs and covers P1 only.
-    passes = p0 + [dict(old, id=REMOTE_MAC_PASS, update_path=None, priority='P1'),
-                   {'id': 'fresh', 'previous': previous, 'update_path': None, 'priority': 'bonus'}]
+    passes = p0 + [dict(old, id=REMOTE_MAC_PASS, update_path=None, priority='P1')]
     for previous in eligible[:HISTORICAL_UPGRADE_LIMIT]:
         supported = source.override(previous)
         path = update_path(candidate, latest, supported)
         passes.append({'id': 'upgrade-' + previous, 'previous': previous,
                        'previous_commit': source.commit(previous), 'old_supports_override': supported,
                        'update_path': path, 'priority': 'bonus'})
+    # Window gestures are only used on the fresh pair. Run independent
+    # historical coverage first so a native input problem cannot block it.
+    passes.append({'id': 'fresh', 'previous': old['previous'], 'update_path': None, 'priority': 'bonus'})
     return {'candidate': candidate, 'candidate_commit': source.commit(candidate),
             'latest_at_plan': latest, 'p0_sequence': [v['id'] for v in p0], 'passes': passes,
             'priority_layout': PRIORITY_LAYOUT}
@@ -322,15 +324,13 @@ Continuity checkpoints require independent before/after receipts as well.
             required['p2-announcements'] = {'gui': True, 'command': True,
                                              'continuity': False, 'priority': 'P2'}
         return required
-    # Dict order is the tester's checkpoint order. `window-drag` follows the
-    # session checks rather than `app-start` for two reasons: a fresh install
-    # has no session at startup, and the main pane's top row only exists once
-    # one is selected; and a failed check stops the pass, so a title-bar
-    # regression should not cost the provisioning and conversation coverage.
+    # The main pane's title bar needs a selected session, so window-drag
+    # follows the session checks. Keep it after the addendum too, since a
+    # missing gesture ends the pass and those earlier checks use different input.
     # Manifests store their own required set, so older runs keep theirs.
     items = ({'artifact-verification': False, 'fixture-clean': False, 'install': False,
               'app-start': True, 'remote-provision': True, 'codex-conversation': True,
-              'remote-terminal': True, 'window-drag': True, 'addendum': False} if pass_id == 'fresh' else
+              'remote-terminal': True, 'addendum': False, 'window-drag': True} if pass_id == 'fresh' else
              {'artifact-verification': False, 'old-fixture': True, 'seed-state': True,
               'continuity-before': False, 'update-relaunch': True, 'preserved-state': True,
               'codex-resume': True, 'remote-update': True, 'reopen': True, 'addendum': False})

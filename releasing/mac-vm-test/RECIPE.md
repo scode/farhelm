@@ -277,7 +277,8 @@ a tier into them.
 4. Start a real authenticated session for each selected agent on the local host. Give each a small conversation and
    require a meaningful reply, terminal input/output and a captured conversation. On Linux, start a plain command
    session and prove its terminal responds. Mock agents or a CLI `--version` alone do not satisfy this.
-5. Check the window's title-bar band (`window-drag`). The Mac app draws its own title bar: empty background in the
+5. Run applicable addendum checks and capture the required evidence.
+6. Check the window's title-bar band (`window-drag`). The Mac app draws its own title bar: empty background in the
    sidebar's top bar and in the main pane's top row of terminal tabs and session actions moves the window when dragged,
    and a double-click there zooms it and a second one restores the prior frame. Controls in those rows keep their own
    behavior. On the windowed app, with one of the sessions above selected so the main pane's row exists, first make sure
@@ -303,19 +304,18 @@ a tier into them.
    command only measures geometry: all gestures and all ten images still come from native CUA. Retain separate image
    occurrences even when their cropped pixels are identical.
 
-   Bonus fixture readiness must prove actual window motion and folder double-click navigation before installing Farhelm.
-   OPERATIONS.md records a native runtime whose drags returned success while leaving Finder stationary; screenshots,
-   clicks and text entry alone do not establish gesture readiness. (Its earlier scrollbar-drag and triple-click
-   observations came from the host Tart binding.) If the native API lacks either gesture or refuses it, the check is
-   could not run, not a product failure. Before reporting a failure, the tester checks that the gesture reached the
-   guest: an unanswered drag is repeated on a Finder window's title bar, and an unanswered double-click is tried on an
-   unselected folder icon in a Finder window in icon view, which should navigate into the folder (in column view a
-   single click already shows a folder's contents). If that check gets no response either, the result is could not run.
-   A Finder title bar is no oracle for double-clicks, because its action follows a user setting that may be off. Record
-   the first run's actual gesture behavior in OPERATIONS.md's computer-use notes.
-6. Run applicable addendum checks. Capture a screenshot per GUI check and command output for command checks. Export
-   evidence with `control.py collect`, verify each exported archive, then `shutdown` and `delete` only this pass's owned
-   clones. Bases remain stopped and unchanged.
+   OPERATIONS.md records a native runtime whose drags returned success while leaving Finder stationary; actual window
+   motion is required evidence. (Its earlier scrollbar-drag and triple-click observations came from the host Tart
+   binding.) If the native API lacks either gesture or refuses it, the check is could not run, not a product failure.
+   Before reporting a failure, the tester checks that the gesture reached the guest: an unanswered drag is repeated on a
+   Finder window's title bar, and an unanswered double-click is tried on an unselected folder icon in a Finder window in
+   icon view, which should navigate into the folder (in column view a single click already shows a folder's contents).
+   If that check gets no response either, the result is could not run. A Finder title bar is no oracle for
+   double-clicks, because its action follows a user setting that may be off. Record the first run's actual gesture
+   behavior in OPERATIONS.md's computer-use notes.
+7. Capture a screenshot per GUI check and command output for command checks. Export evidence with `control.py collect`,
+   verify each exported archive, then `shutdown` and `delete` only this pass's owned clones. Bases remain stopped and
+   unchanged.
 
 ## Bonus: full upgrade on existing state
 

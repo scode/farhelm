@@ -27,7 +27,7 @@ from urllib.request import urlopen
 
 from checkpoint_contract import (ANNOUNCEMENTS_TEST_PATH, REMOTE_MAC_PASS, SIDES,
                                  available_operations, fixed_operations, host_identity,
-                                 is_bonus_pass, prerequisite_checks, require_applicable_operation,
+                                 prerequisite_checks, require_applicable_operation,
                                  require_remote_host_start, require_reopen_transition)
 from guest_ui import NativeUI, tool_definition, wait_running
 from window_geometry import calibrate, select_frame
@@ -657,8 +657,6 @@ assert r.returncode==0
 print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regular file owned by guest')))
 ''')
             result['linux'] = remote
-            if is_bonus_pass(self.task['pass_id']):
-                result['native_geometry_toolchain'] = self.command(['/usr/bin/swift', '--version'])
             return result
         if operation == 'prior_receipts':
             # Only the receipts of the checkpoints this one depends on, by the

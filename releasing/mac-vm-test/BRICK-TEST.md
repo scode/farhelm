@@ -446,11 +446,11 @@ after backoff and stop if it changed. `--timeout` sets the base budget per check
 The effective budget includes any checkpoint-specific floor listed below and is shared by the initial turn, backoff and
 retries. Exact native text entry uses paste with reactive-value verification; the tool omits `typeText` after observed
 partial delivery. Each turn receives its complete selected checkpoint contract, so recipe-file browsing is not part of a
-test. Bonus native readiness additionally proves a real Finder window move and folder double-click before installing
-Farhelm. P0 retains its smaller prerequisites. A gesture tool's successful return is insufficient: an independent
-same-window frame change must establish drag delivery, or that fixture stops as unavailable. Status remains queryable
-while a turn runs; cleanup and another tester refuse an active attempt. If the controller disappears, reconcile the
-retained claim and guest process before cleanup; a stale claim is not permission to start a second tester.
+test. Native readiness checks screenshots, clicks and exact text. The bonus `window-drag` checkpoint needs its own
+observed gesture effects. When a gesture has no effect in Farhelm, test it in Finder before assigning a product failure.
+Keep the unavailable window result and the native frame measurements if Finder also stays stationary. Status remains
+queryable while a turn runs; cleanup and another tester refuse an active attempt. If the controller disappears,
+reconcile the retained claim and guest process before cleanup; a stale claim is not permission to start a second tester.
 
 If that owner has disappeared, run `brick_test.py reconcile-tester "$test_run" <pass>`. A kernel-held owner lease
 refuses interference with a live coordinator. Reconciliation asks the exclusive guest executor to cancel and requires
@@ -514,10 +514,11 @@ P2 is in scope, its feedback and announcement checks. Export and clean up that p
 P1 is in scope. Report each tier's verdict as it settles. A valid P1 or P2 product failure or unavailable observation
 allows ordinary cleanup and later bonus coverage. Its evidence and verdict remain saved. Model, tool or permission
 failures stop the current attempt. Follow "Repair and continue". After Mac pair cleanup, stop in stop-after-P1 or
-stop-after-P2 scope. Full scope continues to `fresh` and `upgrade-v<previous>` (at most three, newest first) when P0
-permits bonus work. Historical manifests without explicit P0 fixtures report `p0.verdict: not planned`, and a tier a run
-never declared reports `not planned`. Do not relabel historical observations or add a live send to a run that never
-planned it.
+stop-after-P2 scope. Full scope continues to `upgrade-v<previous>` (at most three, newest first), then `fresh` when P0
+permits bonus work. The fresh pair runs its window gestures after the other fresh checks. This preserves independent
+coverage when the native tool cannot deliver a drag. Historical manifests without explicit P0 fixtures report
+`p0.verdict: not planned`, and a tier a run never declared reports `not planned`. Do not relabel historical observations
+or add a live send to a run that never planned it.
 
 The guest tester receives the public helper/recipe and a credential-free public source URL. It checks the previous tag's
 source identity, then runs
