@@ -118,3 +118,85 @@ give up width in proportion again, as before this PR, with a test), two test gap
 test's setup, and nothing checking that the tab strip keeps its minimum width while a tunnel pill is showing) and
 wording issues. All were fixed; its verification pass confirmed each and found one wording nit, also fixed. The gate
 passed.
+
+### Landing
+
+#### What landed with it
+
+This plan was the only one in the round. Since the executor last rebased it, main gained the plan
+settings-wait-while-saving (closing Settings and its editors now waits for the helm's answer), a record of an
+investigation into the desktop app's idle CPU use, and TODO edits. The Settings changes are in the same desktop app
+crate but touch none of the code this plan uses: the button component both share, keyboard focus handling, and the tab's
+close question. This plan's double-press tests turn Skip session confirmations on or off through their test setup, not
+through Settings, so the new Settings behavior does not reach them. The list of reference screenshots, which both plans
+changed, merged without a conflict. While the round's checks ran, main gained new TODO entries and a plan; only TODO.md
+differs from what the checks tested.
+
+An independent reviewer and I read the change against main and against the answer to the earlier block. The answer was
+carried out: `+` sits outside the scrolling tabs at the right end of the tab area, stays last in the keyboard order
+(checked at ordinary widths and at 650 pixels), the double press is tested with Skip session confirmations off and on,
+SPEC.md says `+` stays at the right end, and the three refreshed screenshots show it. The extra frame drawn when the tab
+area's width crosses the pinning threshold settles after one frame and cannot repeat. TODO.md loses exactly the two
+entries the report names, and the "Revisit pinning New terminal" entry in "Plan decisions to revisit" stays.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The new TODO entries main gained landed next to the overflow entry this plan removes, so the
+  final rebase conflicted there. I kept main's new entries and removed only this plan's two, so no code changed.
+
+#### What the landing made untrue in the report
+
+- **The unpinned layout is wider than the report says, and the double press can still close a tab there.** The report
+  says `+` goes back to following the last tab only in a 650-pixel session pane with a tunnel pill, where the tab area
+  is about 15 pixels wide and "hardly anything is clickable anyway". `+` is pinned only when the tab area is at least 61
+  pixels wide, and with a tunnel pill that is not the case from 650 up to roughly 700 pixels. In that range the tab area
+  is up to about 60 pixels wide, enough for a tab's ×. Pressing `+` leaves keyboard focus on `+`, so nothing scrolls,
+  the new tab takes `+`'s place, and a second press without moving the pointer lands on its ×, as before this plan.
+  Pinning `+` there would leave the tabs no room at all, so the fallback itself is reasonable. Possible follow-up: in
+  that layout, scroll the tabs after a press on `+` so that `+` stays under the pointer.
+- **The double-press tests' recorded failure is from before their last changes.** The report says each was seen failing
+  at the intended assertion with `+` following the last tab again (run bacf878c). That run came before the second review
+  added checks of the tests' setup. Reading the current tests, the reviewer found that with `+` unpinned they now stop
+  earlier, at the setup check that the second press is aimed at `+` and not at the new tab. They still fail without the
+  fix, at a different check. Nobody ran them that way during the landing.
+- **Window dragging on macOS is expected to work, not shown to.** The report says dragging the window by the gaps
+  between tabs, and by the empty space before the pinned `+`, still works on macOS. The macOS-only test for it is still
+  unrun, as the report's follow-ups say; the landing's reviewer read the code and expects it to pass.
+
+#### Worth knowing
+
+- **Not checked: environment sessions in the narrowest panes.** A container or Tensorlake session's top row has a
+  Suspend or Resume button that other sessions lack. The reviewer could not tell from the code whether that leaves the
+  tab area under 61 pixels at 650 pixels even without a tunnel pill, which would leave `+` unpinned there too, as in the
+  first item under "What the landing made untrue in the report". Possible follow-up: measure that layout.
+- **The docs page "Work in a session" needs a new tabs screenshot and caption.** Its tabs screenshot is cropped from the
+  Agent tab to `+`, so with `+` pinned at the right end its next refresh will come out wide and mostly empty, and its
+  alt text still says `+` comes after the tabs. The page also does not mention the hover-revealed close yet. Possible
+  follow-up: re-crop the shot and update the page.
+- **No reference screenshot shows the hover state.** I agree with the report's follow-up to add one: the red × on hover
+  now comes from new drawing code that no test can see, and it was lost once during this work.
+
+#### Checks
+
+Run once, on the change rebased onto main as it stood when the landing started. The SSH test worker was still
+unreachable, as in the previous round, so the slow suites ran on a boat sandbox (an x86_64 Ubuntu 24.04 VM), and clippy
+ran locally:
+
+- Locally, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+  `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`, all with `-D warnings`: clean.
+- On a boat, every test of the GUI crate and the desktop app (one nextest archive of
+  `-p farhelm-gui -p farhelm-desktop`, run through the recorder), recorded run 90c2ab01-e93c-4c30-a251-7262f1df8168:
+  3,742 passed, 4 skipped (tests marked ignored), and no runtime SKIPPED lines. That is wider than the executor's
+  selection, and it ran on the rebased change together with the Settings changes that landed meanwhile.
+- On a boat, the GPUI end-to-end smoke (`scripts/gui-e2e-smoke.py`), recorded run 88d547a9-a443-4001-9bec-bb34e0a05ac6:
+  49 steps passed, with the paste step skipped as on every Linux run. Its steps open no shell tabs, so it shows only
+  that the session view around them still works.
+- Locally, the full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run
+  716e26f0-e938-47dd-bf28-b0982cbf2eb0, and the check that the list of screenshot scenes is consistent, recorded run
+  7462b2e8-cf58-4c1b-89f7-7889e732b7de: passed. I also looked at the refreshed session toolbar pictures in both
+  appearances and the cut-off session row: `+` sits at the right end of the tab area, next to the tunnel pill.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Skipped: the other crates' tests and the supervisor's end-to-end suite, since the change is in the
+desktop app's session view only; the macOS-only window-drag test, since no Mac was used.
