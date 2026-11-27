@@ -37,12 +37,11 @@ const TRUST_RETRY: Duration = Duration::from_secs(3);
 // Spell the prefix separately so neither the prompt echo nor Turn 1 can supply the recall witness.
 const RECALL_PROMPT: &str = "Join R E C A L L, a hyphen, and my test label on one line. Reply with only that line. No tools.";
 
-/// Different categories need different evidence from the trust screen. A launch smoke check can stop there, while
-/// a test of the explicit trust choice must reject an unexpected prompt.
+/// Different categories need different evidence from the trust screen. Most answer it in their empty workspace and
+/// go on to a turn, while a test of the explicit trust choice must reject an unexpected prompt.
 #[derive(Clone, Copy)]
 enum TrustPolicy<'a> {
     AutoAnswer,
-    StopAtPrompt,
     /// A trusted launch must produce its post-trust composer without rendering any known question.
     FailOnPrompt {
         composer: &'a [&'a str],
@@ -257,6 +256,18 @@ fn auth_block(text: &str) -> Option<&'static str> {
     .find(|marker| text.contains(marker))
 }
 
+/// A vendor account that may not run the selected model right now, as opposed to a CLI or Farhelm fault. Cursor
+/// 2026.11.22 answered a base turn with "GPT-5.6 Luna is not included in your weekly usage. Buy credits or switch to
+/// a Grok model to continue." on an account whose allowance for that model was spent.
+fn usage_block(text: &str) -> Option<&'static str> {
+    [
+        "not included in your weekly usage",
+        "prepaid_balance_exhausted",
+    ]
+    .into_iter()
+    .find(|marker| text.contains(marker))
+}
+
 /// A flag refusal takes precedence over an auth hint. After a successful turn every failure is actionable.
 fn refusal(text: &str, tail: &str, turned: bool) -> Option<DriftError> {
     let tail = tail.to_lowercase();
@@ -280,6 +291,11 @@ fn refusal(text: &str, tail: &str, turned: bool) -> Option<DriftError> {
     if !turned && let Some(marker) = auth_block(text).or_else(|| auth_block(&tail)) {
         return Some(DriftError::CouldNotRun(format!(
             "vendor login or credentials needed ({marker})"
+        )));
+    }
+    if !turned && let Some(marker) = usage_block(text).or_else(|| usage_block(&tail)) {
+        return Some(DriftError::CouldNotRun(format!(
+            "the vendor account's usage does not cover this model now ({marker})"
         )));
     }
     None
@@ -379,18 +395,42 @@ fn opencode_session(output: &str, work: &Path) -> anyhow::Result<String> {
     Ok(owned.id)
 }
 
+/// The known workspace questions' words, lowercased.
+const TRUST_PROMPTS: [&str; 6] = [
+    "do you trust",
+    "is this a project you created",
+    "trust this workspace",
+    "trust this directory",
+    "trust the contents",
+    "trust this folder?",
+];
+
 /// Distinguish the known workspace questions from composer banners containing an agent name.
 fn trust_prompt(text: &str) -> bool {
-    [
-        "do you trust",
-        "is this a project you created",
-        "trust this workspace",
-        "trust this directory",
-        "trust the contents",
-        "trust this folder?",
-    ]
-    .iter()
-    .any(|marker| text.contains(marker))
+    TRUST_PROMPTS.iter().any(|marker| text.contains(marker))
+}
+
+/// Whether an answered trust question has given way to the composer while staying in the screen's text. Cursor
+/// 2026.11.22 draws its startup banner and composer below its trust box once trusted, leaving the box on screen, so
+/// the question alone cannot mean the dialog is still waiting. The composer has to be drawn after the last question,
+/// and no selected answer may be left anywhere on screen: a dialog still up keeps its selection mark (Cursor's `▶`,
+/// and Claude's `❯`, which is also its composer cue), while Cursor's answered box shows none.
+fn composer_after_answered_prompt(text: &str, composer: &[&str]) -> bool {
+    let Some(after) = TRUST_PROMPTS
+        .iter()
+        .filter_map(|marker| text.rfind(marker).map(|at| at + marker.len()))
+        .max()
+        .map(|end| &text[end..])
+    else {
+        return false;
+    };
+    trust_answer(text).is_none() && composer.iter().any(|marker| after.contains(marker))
+}
+
+/// Whether a trust question still waits on screen, as opposed to one that was answered and left behind above the
+/// composer (`composer_after_answered_prompt`). For checks that read the screen after `Terminal::ready` returned.
+fn trust_dialog_waiting(text: &str, composer: &[&str]) -> bool {
+    trust_prompt(text) && !composer_after_answered_prompt(text, composer)
 }
 
 /// Compare the selected option before answering a known workspace question in the test's empty directory.
@@ -405,8 +445,13 @@ fn trust_answer(text: &str) -> Option<&'static [u8]> {
     {
         return Some(b"y");
     }
-    for line in text.lines().map(str::trim) {
-        let Some(option) = line.strip_prefix(['❯', '⟩', '›', '>']) else {
+    // Cursor 2026.11.22 draws its dialog in a box, so an option line starts with the box's `│` border, and marks the
+    // selected option with `▶`.
+    for line in text
+        .lines()
+        .map(|line| line.trim().trim_matches('│').trim())
+    {
+        let Some(option) = line.strip_prefix(['❯', '⟩', '›', '>', '▶']) else {
             continue;
         };
         let option = option.trim_start();
@@ -546,8 +591,9 @@ impl<'a> Terminal<'a> {
     }
 
     /// Await an interactive screen. A trust response is sent once per newly rendered prompt, and again when that
-    /// same rendering is still on screen after TRUST_RETRY. The caller decides whether the prompt itself suffices,
-    /// the workspace can be trusted, or the prompt means the launch choice was ignored.
+    /// same rendering is still on screen after TRUST_RETRY. The caller decides whether the workspace can be trusted
+    /// or the prompt means the launch choice was ignored. Once an answer was sent, a composer drawn below the
+    /// answered question also counts as ready (`composer_after_answered_prompt`).
     ///
     /// The retry exists because Claude Code 2.1.330 lost the answer twice in a row on 2026-11-22: once it reset the
     /// selection to "No, exit" after the Enter, and once the Down never registered. Answering each rendering only
@@ -564,7 +610,7 @@ impl<'a> Terminal<'a> {
                 composer,
                 extra_prompt,
             } => (composer, extra_prompt),
-            TrustPolicy::AutoAnswer | TrustPolicy::StopAtPrompt => (profile.composer, None),
+            TrustPolicy::AutoAnswer => (profile.composer, None),
         };
         let deadline = tokio::time::Instant::now() + START_LIMIT;
         let mut answered: Option<(String, tokio::time::Instant)> = None;
@@ -574,7 +620,6 @@ impl<'a> Terminal<'a> {
             self.check(&text, turned).await?;
             if trust_prompt(&text) || extra_prompt.is_some_and(|is_prompt| is_prompt(&text)) {
                 match trust {
-                    TrustPolicy::StopAtPrompt => return Ok(()),
                     TrustPolicy::FailOnPrompt { .. } => {
                         return Err(anyhow::anyhow!(
                             "unexpected workspace trust prompt\n{}",
@@ -583,6 +628,9 @@ impl<'a> Terminal<'a> {
                         .into());
                     }
                     TrustPolicy::AutoAnswer => {}
+                }
+                if answered.is_some() && composer_after_answered_prompt(&text, composer) {
+                    return Ok(());
                 }
                 let unanswered = answered
                     .as_ref()
@@ -714,6 +762,50 @@ fn reply_on_screen(text: &str, reply: &str) -> bool {
                     .next()
                     .is_some_and(char::is_alphanumeric)
         })
+    })
+}
+
+/// Submit one prompt whose answer is `reply`, refusing to start when that answer is already on screen: replayed or
+/// earlier output that already holds the witness would let a later wait pass without the agent answering. The prompt
+/// is typed and echoed before Enter is sent on its own (`Terminal::type_text`).
+async fn send_prompt(
+    terminal: &mut Terminal<'_>,
+    prompt: &str,
+    reply: &str,
+    turned: bool,
+) -> DriftResult {
+    if reply_on_screen(&terminal.host.screen_tail(SCREEN_BYTES), reply) {
+        return Err(anyhow::anyhow!("the reply was already visible before the prompt").into());
+    }
+    terminal.type_text(prompt, turned).await?;
+    terminal
+        .client
+        .send_keys(terminal.channel, b"\r".to_vec())
+        .await;
+    Ok(())
+}
+
+/// Wait up to TURN_LIMIT for the rendered reply of a turn that has no hook report to wait for: an agent Farhelm does
+/// not track, or a launch whose report is not the evidence the case needs. The screen is checked for refusals and an
+/// ended agent on every pass, so a failed turn ends the wait early with the reason.
+async fn wait_for_reply(terminal: &mut Terminal<'_>, reply: &str, turned: bool) -> DriftResult {
+    let waited = tokio::time::timeout(TURN_LIMIT, async {
+        loop {
+            let text = terminal.host.screen_tail(SCREEN_BYTES);
+            terminal.check(&text.to_lowercase(), turned).await?;
+            if reply_on_screen(&text, reply) {
+                return Ok(());
+            }
+            pace().await;
+        }
+    })
+    .await;
+    waited.unwrap_or_else(|_| {
+        Err(anyhow::anyhow!(
+            "the drift prompt got no matching reply ({reply})\n{}",
+            terminal.diagnostics()
+        )
+        .into())
     })
 }
 
@@ -1400,6 +1492,84 @@ mod tests {
             trust_answer("do you trust the contents?\n> yes, i trust this folder\n  no, exit"),
             Some(&b"\r"[..])
         );
+    }
+
+    /// Cursor draws its trust dialog inside a box and marks the selected option with `▶`, so its option lines start
+    /// with the box border. Without reading through the border the base case waited out its start limit on an
+    /// unanswered dialog (Cursor 2026.11.22). Specified: the boxed screen, lowercased as `ready` reads it, is a trust
+    /// prompt answered with Enter while the trust option is selected, and with nothing while Quit is.
+    #[farhelm_testtrace::test]
+    fn a_boxed_trust_dialog_is_answered_through_its_border() {
+        let screen = |trust: &str, quit: &str| {
+            format!(
+                "  ╭──────╮\n  │  ⚠ workspace trust required   │\n  │  do you trust the contents of this \
+                 directory?   │\n  │  {trust}[a] trust this workspace   │\n  │  {quit}[q] quit   │\n  ╰──────╯\n"
+            )
+        };
+        let selected = screen("▶ ", "  ");
+        assert!(trust_prompt(&selected));
+        assert_eq!(trust_answer(&selected), Some(&b"\r"[..]));
+        assert_eq!(trust_answer(&screen("  ", "▶ ")), None);
+    }
+
+    /// A spent vendor allowance is a missing prerequisite like a login, not a Farhelm or CLI fault, so before any turn
+    /// has succeeded it must read as COULD NOT RUN rather than FAILED. Specified: Cursor's usage refusal (screen
+    /// text lowercased as the checks read it) is CouldNotRun before a turn and no verdict of its own after one.
+    #[farhelm_testtrace::test]
+    fn a_spent_vendor_allowance_could_not_run() {
+        let screen = "→ reply fh then 0db8c0a6\nerror: gpt-5.6 luna is not included in your weekly usage\nbuy credits \
+                      or switch to a grok model to continue.\nratelimitreason: prepaid_balance_exhausted\n";
+        assert!(matches!(
+            refusal(screen, "", false),
+            Some(DriftError::CouldNotRun(_))
+        ));
+        assert!(refusal(screen, "", true).is_none());
+    }
+
+    /// Cursor 2026.11.22 leaves its answered trust box on screen and draws its banner and composer below it; the
+    /// base case then waited out its start limit on a screen that still read as a trust question. A dialog that is
+    /// still up must not count, even where its selection glyph is also the agent's composer cue. Specified: Cursor's
+    /// screen after the answer (no selection left, "trusting workspace...", then the composer's arrow) is ready; the
+    /// same box before the answer is not, even with a composer cue drawn below it; Claude's dialog, whose `❯` is
+    /// also its composer cue, is not; and a screen with no trust question at all is not ready by this rule (the plain
+    /// composer check covers it).
+    #[farhelm_testtrace::test]
+    fn a_composer_below_an_answered_trust_box_is_ready() {
+        let cursor = ["cursor agent", "→"];
+        let boxed = |options: &str, tail: &str| {
+            format!(
+                "  │  cursor agent can execute code and access files in this directory.   │\n  │  do you trust the \
+                 contents of this directory?   │\n{options}{tail}"
+            )
+        };
+        let after = boxed(
+            "  │    [a] trust this workspace   │\n  │    [q] quit   │\n",
+            "  │  ⏳ trusting workspace...   │\n  ╰───╯\n\n  cursor agent\n  v2026.11.22\n\n  → plan, search, build anything\n",
+        );
+        assert!(composer_after_answered_prompt(&after, &cursor));
+        let before = boxed(
+            "  │  ▶ [a] trust this workspace   │\n  │    [q] quit   │\n",
+            "  │  use arrow keys to navigate, enter to select   │\n  ╰───╯\n",
+        );
+        assert!(!composer_after_answered_prompt(&before, &cursor));
+        // The open box with a composer cue drawn below it still waits on its selected answer.
+        let open_over_composer =
+            format!("{before}\n  cursor agent\n  → plan, search, build anything\n");
+        assert!(!composer_after_answered_prompt(
+            &open_over_composer,
+            &cursor
+        ));
+        assert!(trust_dialog_waiting(&open_over_composer, &cursor));
+        assert!(!trust_dialog_waiting(&after, &cursor));
+        let claude = "claude code v2.1\ndo you trust the files in this folder?\n❯ 1. yes, i trust this folder\n  2. no, exit\n";
+        assert!(!composer_after_answered_prompt(
+            claude,
+            &["claude code v", "❯"]
+        ));
+        assert!(!composer_after_answered_prompt(
+            "cursor agent\n→ plan",
+            &cursor
+        ));
     }
 
     /// Weak models decorate the answer they were told to give alone; the word still has to open the line.

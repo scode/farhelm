@@ -380,46 +380,6 @@ fn new_code_word() -> String {
     format!("FH{}", random[..8].to_ascii_uppercase())
 }
 
-/// Refuse pre-existing answer text from replay before sending a prompt that can produce the witness.
-async fn send_prompt(
-    terminal: &mut Terminal<'_>,
-    prompt: &str,
-    reply: &str,
-    turned: bool,
-) -> DriftResult {
-    if reply_on_screen(&terminal.host.screen_tail(SCREEN_BYTES), reply) {
-        return Err(anyhow::anyhow!("the reply was already visible before the prompt").into());
-    }
-    terminal.type_text(prompt, turned).await?;
-    terminal
-        .client
-        .send_keys(terminal.channel, b"\r".to_vec())
-        .await;
-    Ok(())
-}
-
-/// Wait for the rendered reply in a harness that has no hook report to wait for on this launch.
-async fn wait_for_reply(terminal: &mut Terminal<'_>, reply: &str, turned: bool) -> DriftResult {
-    let waited = tokio::time::timeout(TURN_LIMIT, async {
-        loop {
-            let text = terminal.host.screen_tail(SCREEN_BYTES);
-            terminal.check(&text.to_lowercase(), turned).await?;
-            if reply_on_screen(&text, reply) {
-                return Ok(());
-            }
-            pace().await;
-        }
-    })
-    .await;
-    waited.unwrap_or_else(|_| {
-        Err(anyhow::anyhow!(
-            "the named-start drift prompt got no matching reply\n{}",
-            terminal.diagnostics()
-        )
-        .into())
-    })
-}
-
 drift_cases! {
     execute;
     drift_claude => Claude,
