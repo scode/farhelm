@@ -101,6 +101,67 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   will "fit" just seems to overflow "under" the buttons to the right and you can't access the + button anymore to add
   more. This was observed on 0.46.0-rc.2; it's possible it got fixed in one of the plans in flight since then.
 
+- **Reject flag-like values for CLI `--effort`.** PR #4954 (`agent-catalog-cli-and-drift-cleanups`) added
+  `allow_hyphen_values = true` to `--effort` on `LaunchFlags` (`crates/farhelm/src/main.rs`) so hyphen-prefixed custom
+  effort values like `--effort -fast` work as a separate argument without `--effort=-fast`. The side effect is that a
+  mistyped command missing its value (for example `--effort --yolo`) now consumes `--yolo` as the literal effort string
+  instead of failing to parse; built-in agents reject unknown efforts in the helm, but custom agents silently launch
+  with `--yolo` as their effort. Reject flag-like values for `--effort`, update `SPEC_impl.md` and CLI parse tests, and
+  check whether `--model` should follow the same rule.
+
+- **Investigate and remove the legacy `POST /api/sandbox-sessions` endpoint.** `POST /api/sandbox-sessions`
+  (`create_sandbox_session` in `crates/farhelm-helm/src/sessions/sandbox.rs`, mounted in
+  `crates/farhelm-helm/src/lib.rs`) is the pre-Podman Tensorlake-only spelling of `POST /api/environment-sessions`: it
+  takes `SandboxCreateRequest` (no `place` field), hardcodes `Place::TensorlakeAccount`, and calls
+  `admit_environment_session(..., require_confirmed_size: false)`. Nothing in the desktop app, CLI, or any production
+  client calls it anymore — only helm tests (`crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`) still hit
+  it, and the helm only ever runs embedded inside the desktop app of the same build. Context from PR #4988
+  (`recipe-card-and-billed-size-fixes`): #4988 bound Tensorlake billing confirmation to `confirmed_size` on
+  `POST /api/environment-sessions` (`require_confirmed_size: true`), but left `POST /api/sandbox-sessions` accepting
+  `confirmed: true` without `confirmed_size` for "historical callers", and `SPEC_impl.md` still describes both that
+  flag-only fallback and a mixed-version older-helm refusal that cannot happen in practice. Verify why this legacy
+  endpoint is still around and whether anything external depends on it; if nothing does, remove the route,
+  `SandboxCreateRequest`, the `require_confirmed_size` parameter, and the stale `SPEC_impl.md` wording, and move any
+  remaining test coverage onto `POST /api/environment-sessions`.
+
+- **Unblock supervisor startup Restart scope cleanup when the replacement's terminal host still answers.** Context from
+  PR #5005 (`supervisor-stop-and-restart-cleanup-fixes`, landing review should-fix): on Linux, each agent launch runs in
+  a transient systemd user scope (`crate::scope::unit_name(&id, generation)`). When Restart finds its session row
+  deleted mid-relaunch and reaping the replacement agent's process tree/scope fails in
+  `crates/farhelm-supervisor/src/service/core/host_restart.rs`, it records `(id, generation)` in `supervisor.db`
+  (`record_pending_scope_cleanup`) so the next supervisor startup retries cleanup in `retry_pending_scope_cleanups`. To
+  keep startup from trusting a vacant scope while a launch's first-stage starter might still be spawning a late process
+  into it, #5005 kept the replacement's `.host` launch record on disk when scope cleanup is unconfirmed, excluded that
+  record's socket from generic orphan cleanup in `crates/farhelm-supervisor/src/service/core/host_reclaim.rs`
+  (`reclaimable_records`, because both run at startup and only one may touch a given record), and added
+  `confirm_failed_restart_host_gone(&artifacts, &held.sockets)` at the top of `retry_pending_scope_cleanups` before
+  sweeping the scope. The bug is in `confirm_failed_restart_host_gone`: it calls
+  `settle_launch_record(&record, &socket)` and returns an error (`"the recorded host at ... is still running"`) on
+  `AtRecordedSocket::Answered`, making `retry_pending_scope_cleanups` `continue` without running the scope sweep or
+  retiring the obligation. So when Restart hits the sequence (1) session deleted mid-relaunch, (2) reaping the
+  replacement agent's scope fails, and (3) ending the replacement terminal host (`end_launch_host`) also fails, on every
+  later supervisor startup the host still answers at its socket, `retry_pending_scope_cleanups` skips it forever (never
+  cleaning the agent's scope or retiring the DB row), and `host_reclaim.rs` also skips that host because the pending
+  cleanup owns its record (before #5005, startup still cleaned the scope in that case). A host that answers has already
+  finished starting its agent, so the late-start race no longer applies to it: when `settle_launch_record` returns
+  `AtRecordedSocket::Answered` for an unheld failed-restart host, still clean its scope (and decide whether
+  `retry_pending_scope_cleanups` should also attempt to end the answering host so the record and pending obligation can
+  eventually retire, or leave the host record and obligation in place while cleaning the scope). Update `SPEC_impl.md`
+  if needed and add a regression test for a failed Restart whose replacement host still answers across supervisor
+  restart.
+
+- **Update release brick-test instructions for the removed startup Welcome card.** PRs #5012 and #5018
+  (`welcome-empty-state`) replaced the startup Welcome modal card (dismissed with "Got it") with an inline Welcome view
+  in the empty main pane, so fresh installs of the next candidate no longer show a Welcome card or a "Got it" button.
+  `releasing/mac-vm-test/guest_workflow.py` (`managed_instructions` for `app-start` still says
+  `"dismiss welcome with got it"` unconditionally before the conditional append) and
+  `releasing/mac-vm-test/BRICK-TEST.md` ("On the first open after a fresh install, or after upgrading from a release
+  without it, dismiss the welcome card with **got it**") still tell the guest agent to dismiss the card unconditionally,
+  which can trip the next brick test. Remove the unconditional Welcome dismissal from candidate `app-start` and update
+  `BRICK-TEST.md` (keeping conditional handling only for older previous-release baselines such as `old-fixture` and
+  `checkpoint_contract.py` where the card still exists), and update the brick-test unit tests under
+  `releasing/mac-vm-test/` as needed.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
