@@ -299,6 +299,12 @@ pub(crate) mod report_pin;
 #[cfg(test)]
 mod screen_fixtures;
 pub(crate) mod screen_reader;
+/// The drift tests' view of the permission-footer readers: which footers each harness has a reader for, and the reading
+/// the sampler takes from a screen; see the items' own docs.
+#[cfg(feature = "test-seams")]
+pub use screen_reader::{
+    StatusLineYoloSupport, status_line_yolo_for_test, status_line_yolo_support_for_test,
+};
 #[cfg(test)]
 mod status_line_fixtures;
 pub use grok::{

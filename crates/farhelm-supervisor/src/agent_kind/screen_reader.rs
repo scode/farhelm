@@ -91,6 +91,63 @@ pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str
     }
 }
 
+/// What [`status_line_yolo`] can read from a launch harness's permission footer: nothing, only the bypass (YOLO)
+/// footer, or both the bypass footer and a recognized non-bypass one. It is the one statement of which harnesses have a
+/// footer reader, written beside the dispatch it describes, so the captured-footer fixtures and the live drift tests
+/// read it instead of each keeping its own list that drifts when a reader is added.
+#[cfg(any(test, feature = "test-seams"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusLineYoloSupport {
+    /// No footer reader: every screen reads `None`.
+    None,
+    /// The bypass footer reads `Some(true)`, and nothing reads `Some(false)` (Cursor shows no definite non-bypass
+    /// footer, so its absent label stays unreadable).
+    YoloOnly,
+    /// The bypass footer reads `Some(true)` and a recognized non-bypass footer `Some(false)`.
+    YoloAndNonYolo,
+}
+
+/// Which footers [`status_line_yolo`] reads for `harness` ([`StatusLineYoloSupport`]). Keep it in step with that
+/// dispatch: the captured-footer fixture test requires fixtures for every harness this names, of each kind it names.
+#[cfg(any(test, feature = "test-seams"))]
+#[warn(clippy::wildcard_enum_match_arm)]
+pub fn status_line_yolo_support_for_test(
+    harness: farhelm_proto::LaunchHarness,
+) -> StatusLineYoloSupport {
+    use farhelm_proto::LaunchHarness;
+    match harness {
+        LaunchHarness::Claude | LaunchHarness::Grok | LaunchHarness::Muse => {
+            StatusLineYoloSupport::YoloAndNonYolo
+        }
+        LaunchHarness::Cursor => StatusLineYoloSupport::YoloOnly,
+        LaunchHarness::Codex
+        | LaunchHarness::Goose
+        | LaunchHarness::Pi
+        | LaunchHarness::Omp
+        | LaunchHarness::Antigravity
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => StatusLineYoloSupport::None,
+    }
+}
+
+/// [`status_line_yolo`] as the supervisor's sampler applies it: to the last [`SAMPLE_TAIL_BYTES`] of `raw_screen`,
+/// trimmed the way the sampler trims, so a test reading a whole live screen gets the reading the session listing is
+/// built from. For the drift tests, which see a real agent's screen but cannot call the crate-private reader; the
+/// listing's `screen_yolo` alone cannot tell a recognized non-bypass footer from an unreadable one, since only
+/// `Some(true)` is latched.
+#[cfg(any(test, feature = "test-seams"))]
+pub fn status_line_yolo_for_test(
+    harness: farhelm_proto::LaunchHarness,
+    raw_screen: &str,
+) -> Option<bool> {
+    status_line_yolo(
+        harness,
+        farhelm_terminal_emulator::trim_screen_tail(raw_screen, SAMPLE_TAIL_BYTES),
+    )
+}
+
 /// Read workspace trust for an explicitly declared launch or its activity kind.
 ///
 /// The launch-harness route preserves hints for existing Muse launches. Command
