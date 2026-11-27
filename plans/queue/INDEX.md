@@ -9,4 +9,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 5d8b58] `drift-base-isolation-and-turns.md` — Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category
 - [pending] `drift-persistent-hooks.md` — Add persistent_hooks drift category verifying Grok and Antigravity hooks inside and outside Farhelm (after `drift-base-isolation-and-turns.md`)
 - [complete] `drift-conversation-rotation.md` — Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
-- [complete] `drift-permission-footer.md` — Extend permission_modes drift checks with Guarded launches and tri-state permission-footer verification
+- [landing 09fdd1] `drift-permission-footer.md` — Extend permission_modes drift checks with Guarded launches and tri-state permission-footer verification
