@@ -421,8 +421,10 @@ starting the next. Retain the installer pair for its in-scope P1 and P2 checks. 
 `p1-remote-mac` once all P0 pairs have been cleaned up, including any failed pair released after a retention decision.
 The two Mac guests belong to this one working pair. Never provision frozen bases.
 
-On the first open after a fresh install, or after upgrading from a release without it, dismiss the welcome card with
-**got it** before driving the session UI. This is ordinary startup, not an additional P0 feature fixture.
+The candidate shows Welcome inline in the empty main pane, so neither its first open after a fresh install nor its
+relaunch after an upgrade has a Welcome card to dismiss. A previous release used as an upgrade baseline may still open a
+Welcome card over the session UI on its first open: dismiss it with **got it** if it appears, before driving the session
+UI. This is ordinary startup, not an additional P0 feature fixture.
 
 For each ready fixture, run `python3 -B releasing/mac-vm-test/brick_test.py test "$test_run" <pass>`. Keep its separate
 `serve` owner alive. The `test` command injects already-authorized credentials into the GUI Mac and its Linux peer. For
