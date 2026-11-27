@@ -576,7 +576,7 @@ impl HelmStore {
         events: Arc<manager::FleetEvents>,
     ) -> anyhow::Result<()> {
         self.conn()
-            .call("late checkout notice task panicked", move |conn| {
+            .call("late Delete notice task panicked", move |conn| {
                 let content = serde_json::to_string(&NoticeContent::LateDelete { detail })?;
                 let changed = conn.execute(
                     "INSERT INTO notices (host_id, kind, condition_key, raised_at, read, resolved, content)

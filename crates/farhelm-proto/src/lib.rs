@@ -2645,7 +2645,8 @@ pub enum AgentReply {
     /// agent's terminal host. This does not acknowledge vendor processing or completion; retrying
     /// sends another prompt.
     Prompted {},
-    /// A completed session deletion. A checkout notice is part of the
+    /// A completed session deletion. Its notice (a checkout left behind, or
+    /// a Podman container whose stop could not be confirmed) is part of the
     /// success and must be reported even though the session is gone.
     Deleted { outcome: SessionDeleteOutcome },
     /// Answers `Create` and `Clone`: the session that now exists, in the

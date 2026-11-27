@@ -68,16 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Align `SPEC.md` and code on which agent-requested Delete warnings go to the notices bell.** From PR #5088
-  (`agent-delete-late-notice`): when an agent deletes a session via `farhelm agent delete` and cleanup produces a
-  warning (for example, a managed checkout folder could not be archived safely, or stopping a container session's
-  container could not be confirmed), Farhelm posts that warning to the desktop app's notices bell in addition to
-  returning it to the agent, so the user still sees it even if the agent ignores it or times out. The mismatch is that
-  the code posts every notice Delete produces (including container-stop warnings that have no checkout path), whereas
-  `SPEC.md`'s agent-Delete rule says only leftover-checkout notices go to the bell. Decide whether to keep posting all
-  agent-Delete notices and widen `SPEC.md` from "checkout notice" to "Delete notice" (or narrow the code to checkout
-  notices only). Plan: `plans/queue/agent-delete-notices-bell-alignment.md`.
-
 - **Return keyboard focus to the pre-right-click target when cancelling a Stop or Delete confirmation from a marked
   right-click menu.** From PR #5090 (`session-right-click-menu`): right-clicking one of several marked sessions opens
   the bulk menu, and dismissing that menu returns focus to where it was before (usually the terminal). However, if you

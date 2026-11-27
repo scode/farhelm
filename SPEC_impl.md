@@ -4025,8 +4025,9 @@ no archive listing cache. IDs select records, never paths supplied by the client
 replies retain their existing JSON shapes. If the helm's reply deadline expires, it saves any late cleanup notice under
 the host and removed session's ID and wakes the notices feed after committing it. This includes Replace's source Delete.
 A timely client reply carries its own notice and adds nothing to this history. An agent Delete (`farhelm agent delete`)
-saves its checkout notice there even when its reply is timely, since the asking agent may not pass it on. A read mark
-also resolves a late Delete's notice because the Delete has already finished.
+saves its Delete notice there (a checkout left behind, or an unconfirmed container stop) even when its reply is timely,
+since the asking agent may not pass it on. A read mark also resolves a late Delete's notice because the Delete has
+already finished.
 
 `checkout_trash` operates only on retired working-copy rows with a recorded archive destination. It derives that path
 under the recorded root, opens the root and archive without following their final symlinks, and applies the
@@ -6812,8 +6813,9 @@ runs the ordinary local forgetting and reports the supervisor's count; `Sealed` 
 same removal path as host removal, under the lock already held.
 
 At the inner deadline, the helm releases the Delete turn and provisioning lock. If an already-sent request later reports
-a non-final Delete with a checkout notice, the helm keeps the notice in the bell. The receiver lasts until its reply or
-connection close. The listing remains responsible for reporting a late seal.
+a non-final Delete with a cleanup notice (such as a checkout left behind or an unconfirmed container stop), the helm
+keeps the notice in the bell. The receiver lasts until its reply or connection close. The listing remains responsible
+for reporting a late seal.
 
 Whenever a connection publishes a listing with `sealed` set for a session-owned, machine-deleting host, a helm-owned
 finisher destroys it through that same function, at most one at a time per host. A sealed listing from any other host is
@@ -7792,11 +7794,12 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   the supervisor bounds the relay and is the only party that can distinguish its two failures (see the transport
   section's version-20 paragraph).
 - `farhelm agent delete --session <id> [--stop-if-running]` — removes an explicitly named session, refusing self-delete.
-  Success prints `deleted <id>` on stdout and any checkout notice on stderr. The relay and helm both refuse self-delete;
-  the helm derives a delete guard from the target state shown on its approval card and passes it unchanged to the
-  supervisor. Without the flag, a live main program or terminal tab is refused. The usual teardown can still reap
-  background jobs left after the main program exits. UI and agent deletes share the helm's approval denial, teardown and
-  best-effort local cleanup; Replace shares the successful local cleanup after inheriting its pin.
+  Success prints `deleted <id>` on stdout and any Delete notice (a checkout left behind or an unconfirmed container
+  stop) on stderr. The relay and helm both refuse self-delete; the helm derives a delete guard from the target state
+  shown on its approval card and passes it unchanged to the supervisor. Without the flag, a live main program or
+  terminal tab is refused. The usual teardown can still reap background jobs left after the main program exits. UI and
+  agent deletes share the helm's approval denial, teardown and best-effort local cleanup; Replace shares the successful
+  local cleanup after inheriting its pin.
 - `farhelm agent create` and ordinary `farhelm spawn` accept mutually exclusive `--prompt` and `--prompt-file` (`-`
   reads stdin). Shared flag parsing materializes at most one launch budget of UTF-8 text, allowing newline and tab but
   refusing other controls. Template writes use that same field, and listings include its text. The prompt travels beside

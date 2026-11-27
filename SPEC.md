@@ -2176,8 +2176,9 @@ Farhelm's management, and leaves the folder where it is. That outcome must never
 visible notice that the checkout was not archived, naming the path left behind and, where known, why. Wherever Delete's
 result is shown, the notice is shown with it. If Delete or Replace has already answered with a timeout, the checkout
 notice appears in the navigation rail's notices bell once the host reports the outcome of the removal. A Delete an agent
-asks for (`farhelm agent delete`) always puts its checkout notice in the notices bell as well as in the agent's answer,
-since the agent may not pass it on.
+asks for (`farhelm agent delete`) always puts its Delete notice (the checkout notice, and any other cleanup warning the
+Delete reports, such as a Podman container whose stop could not be confirmed) in the notices bell as well as in the
+agent's answer, since the agent may not pass it on.
 
 Only successful user-initiated Managed checkout launches contribute new repository suggestions. The helm shares the
 history across all destinations, newest repository first, including for new environments and offline hosts. Removing a
@@ -3516,9 +3517,9 @@ drawn list can include an update before its frame reaches the screen (see [One G
 and cleared state is kept by the helm across resets and restarts. Removing a host removes its notices; an unreachable
 host keeps its last known notices.
 
-A late Delete notice, or the checkout notice of a Delete an agent asked for, names the host and shows its cleanup
-details, including the path and reason for any checkout left behind. Reading this notice marks it resolved so it can be
-cleared from the history.
+A late Delete notice, or the notice of a Delete an agent asked for, names the host and shows its cleanup details,
+including the path and reason for any checkout left behind and any container whose stop could not be confirmed. Reading
+this notice marks it resolved so it can be cleared from the history.
 
 A blocked-agent notice (`farhelm agent notify`, see the ntfy alerts above) names the session by its title and its host,
 with the agent's reason below. Each session has at most one, a later report replacing it as a new unread notice, and a
@@ -4775,14 +4776,15 @@ unconfirmed; it never prints an unobserved completion as success. There is no `f
 replacing its own session would be killing itself mid-request, which is a design question this version leaves open
 rather than answers by accident.
 
-`farhelm agent delete --session <id> [--stop-if-running]` removes a session with the same teardown and checkout notices
-as the UI's Delete, and always also puts a checkout notice in the notices bell (see Managed checkouts). Without the flag
-it refuses to delete a session whose main program or any terminal tab is still running. The approval card says what
-deletion can stop and what would make Farhelm refuse it. Deletion is held to that displayed state just as a UI
-confirmation is. A session cannot delete itself: its relay holds its own request fence until the reply, while deletion
-must take that same fence before revoking its credential. Self-stop remains available. A delete also refuses a target
-with an agent command still in flight rather than waiting, so two sessions deleting each other cannot stall on each
-other's fences. A lost reply means outcome unknown; it never claims that the session survived.
+`farhelm agent delete --session <id> [--stop-if-running]` removes a session with the same teardown and Delete notices as
+the UI's Delete, and always also puts any Delete notice in the notices bell, whether it reports a checkout left behind
+or a container whose stop could not be confirmed (see Managed checkouts). Without the flag it refuses to delete a
+session whose main program or any terminal tab is still running. The approval card says what deletion can stop and what
+would make Farhelm refuse it. Deletion is held to that displayed state just as a UI confirmation is. A session cannot
+delete itself: its relay holds its own request fence until the reply, while deletion must take that same fence before
+revoking its credential. Self-stop remains available. A delete also refuses a target with an agent command still in
+flight rather than waiting, so two sessions deleting each other cannot stall on each other's fences. A lost reply means
+outcome unknown; it never claims that the session survived.
 
 An approved `farhelm agent stop --session <id>` stops the session's main program and closes all its terminal tabs. The
 Stop heading describes both consequences. Stop and Delete approval cards name the shell for Bash or Zsh, the agent for

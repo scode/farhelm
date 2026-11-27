@@ -120,7 +120,7 @@ fn render(agent: &Command) -> String {
          --stop-if-running permits stopping the agent and all tabs. The approval card names\n\
          what will stop; a changed running state can refuse the delete. A session cannot\n\
          delete itself; use stop instead. A target with a Farhelm command in flight is\n\
-         refused until that command finishes. Report any checkout notice printed on stderr.\n\
+         refused until that command finishes. Report any cleanup warning printed on stderr.\n\
          Restart resumes the target's own conversation; there is no other kind of restart\n\
          and no --mode. It works only when the restart_offer field of sessions --json is\n\
          resume, which the table's OFFER column also spells resume. Any other value says why\n\
