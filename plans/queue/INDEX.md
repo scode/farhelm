@@ -7,6 +7,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `settings-save-close-delete-prompt.md` — Document Settings Save-and-Close dismissing unanswered inline Delete confirmations and align Recipes' Back/Cancel leave prompt
 - [in-flight 3d1b8e] `helm-replace-refuse-destination-change.md` — Make the helm Replace API refuse destination folder changes and fresh managed checkouts
 - [complete] `shell-tab-first-close-sweep-backoff.md` — Apply the existing 1 s to 60 s retry backoff when an exited shell tab's first automatic close sweep fails
-- [in-flight ced1a3] `agent-delete-notices-bell-alignment.md` — Widen spec, docs, comments, and agent instructions from checkout notices to all agent-Delete cleanup notices
+- [complete] `agent-delete-notices-bell-alignment.md` — Widen spec, docs, comments, and agent instructions from checkout notices to all agent-Delete cleanup notices
 - [in-flight 1c1472] `marked-right-click-cancel-focus.md` — Return focus to the pre-right-click target when cancelling bulk Stop, Delete, or New group dialogs opened from the marked right-click menu
 - [in-flight f6c41a] `stop-ambiguous-failed-restart-create.md` — Keep uniform Stop refusal on unconfirmed launches and reword the refusal message accurately
