@@ -130,3 +130,80 @@ Each PR had a fresh-context Opus 5.5 review at high effort. Neither found a bloc
   downloads.
 
 The fixes were not reviewed again; runs `5dcde16b` and `cc81b9ba` ran after them.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained only queue bookkeeping. In the same round, and right after it,
+the plan shift-cmd-v-paste-upload landed: Cmd+Shift+V on a Mac (Ctrl+Alt+V on Linux) uploads the clipboard's text to the
+session's host as a file and types its path. Both change the desktop app's terminal, SPEC.md and the "Work in a session"
+docs page, but they meet nowhere: this plan's gesture is a mouse click on a file path, the other is a key chord, and no
+code one plan changed is used by the other. Neither chord nor gesture is bound to anything else. Their SPEC.md and docs
+paragraphs agree with each other. Both removed a TODO entry next to the other's, which was the round's one conflict;
+both entries are gone.
+
+An independent reviewer and I read the change. The read into memory stops at the 10 MB cap without holding more than
+that, the image signature checks are right, every listed image format is one the Mac clipboard takes, and the newest
+copy always wins. Nothing in it is more elaborate than the plan needs.
+
+#### Fixes made while landing
+
+None.
+
+#### What the landing made untrue in the report
+
+Nothing changed by the landing itself, but the review found one sentence of the report that was wrong from the start:
+
+- **Under mouse reporting on Linux, the program does not get the copy click.** The report says that when a full-screen
+  program takes mouse input, the copy click still reaches the program as a click. That holds on a Mac, where the file is
+  copied and the program also gets the click. On Linux, Shift is the key that makes a click act in Farhelm instead of
+  going to such a program (as a Shift-drag selects text there), so a Shift-Ctrl-click copies the file and the program
+  sees no click at all. This follows the same convention as SPEC.md's Shift-drag rule; only the report's sentence is
+  wrong for Linux.
+
+#### Worth knowing
+
+- **The hover card's hint line now wraps awkwardly.** I looked at the refreshed reference picture of the file hover
+  card. For a small file that can also be opened, the hints no longer fit on the line with the file's size, so the size
+  ("4.8 KB") stands alone and the next line starts with a stray "·" before "click to download". Possible follow-up:
+  start the hints on their own line when they do not fit beside the size, or drop the leading separator when they wrap.
+- **The copy hint is offered for files a copy will refuse.** The same picture shows "⇧⌘-click to copy contents" on an
+  8.4 MB `report.pdf`. A real PDF is refused when clicked ("the file is not text or a supported image"). The executor
+  chose to judge by the contents rather than keep a list of extensions that are never text, so that a `.pdf` that is
+  really text still copies. That is defensible, but the hint now promises something most PDFs, archives and programs
+  under 10 MB cannot do. Possible follow-up: leave the hint off for common binary extensions while still letting the
+  click try.
+- **Not described in SPEC.md: a copy click clears any selection in the terminal.** The report explains why (Shift would
+  otherwise extend an earlier selection and swallow the copy). Possible follow-up: say so in SPEC.md's file-path rule.
+- **A copy and a download share one status line**, and neither cancels the other, so whichever finishes last has the
+  final word, as with two downloads. Nothing to do unless this confuses in practice.
+- **The security-model docs page does not mention copying a file's contents.** Nothing on it became false; copying is
+  the same transfer across the host boundary as a download, as SPEC.md now says.
+
+#### Checks
+
+Run once, on both of the round's plans stacked on main as it stood when the landing started (shift-cmd-click-copy-file,
+then shift-cmd-v-paste-upload), so each plan's code was tested together with the other's. The SSH test worker was still
+unreachable, as in the previous two rounds, so the slow suites ran on a boat sandbox (an x86_64 Ubuntu 24.04 VM), and
+clippy ran locally:
+
+- Locally, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+  `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`, all with `-D warnings`: clean.
+- On a boat, every test of the helm client (which the copy plan changed), the GUI crate and the desktop app (built once
+  for `-p farhelm-helm-client -p farhelm-gui -p farhelm-desktop` and run through the recorder), recorded run
+  bf7906bf-b4f3-4cdc-a81e-ad8ee912dd6b: 3,846 passed, 4 skipped (tests marked ignored), and no test that quietly passed
+  for lack of systemd or SSH on the machine. That is wider than either executor's selection.
+- On a boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  26fb6b9d-b461-481f-87f4-30b46b24ab50: 49 steps passed, with the paste step skipped as on every Linux run, so it says
+  nothing about the clipboard; it covers the terminal, its keys and the Keyboard shortcuts overview around them.
+- Locally, the full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run
+  49fe77c7-3619-45d7-983b-16dc390362d0, and the test that checks the list of screens the screenshot comparison draws,
+  recorded run 2364f0f1-04d5-4eb0-8e2b-1ceee283c607: passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format`,
+  `dprint check` on the changed Markdown, and the docs website build (`bun run build`, which checks every link): passed.
+
+Reused: nothing. Skipped: the other crates' tests and the supervisor's end-to-end suite, since neither plan changes the
+helm, the supervisor or the protocol; any run on a Mac, since none was available to the landing, so the Mac-only parts
+(for shift-cmd-click-copy-file, an image reaching the real Mac clipboard; for shift-cmd-v-paste-upload, the Mac menu
+item and holding the chord down) are covered only by tests that set the platform themselves.
