@@ -105,6 +105,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its own change because it widens which conversations Farhelm captures. The upstream research and the incident's
   evidence are in `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`.
 
+- **Keep the new-terminal button reachable when terminal tabs overflow.** Opening more terminals next to an agent than
+  will "fit" just seems to overflow "under" the buttons to the right and you can't access the + button anymore to add
+  more. This was observed on 0.46.0-rc.2; it's possible it got fixed in one of the plans in flight since then.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
