@@ -152,8 +152,12 @@ pub struct ReplaceSessionBody {
     /// counts `with.confirm_yolo` (either place confirms), so a builder sets
     /// this one and leaves the inner one false.
     pub confirm_yolo: bool,
-    /// Replace with's create. Its `host` is absent or the source's own host:
-    /// the helm refuses another host, since Clone is the way to move hosts.
+    /// Replace with's create, which keeps the source's destination; Clone is
+    /// the way to start a session anywhere else. Its `host` is absent or the
+    /// source's own host, and its `cwd` is the source's `cwd` exactly as
+    /// listed, with no path normalization: the helm refuses another host or
+    /// folder with a 409. Its `github_checkout` is `None`: the helm refuses a
+    /// new managed checkout with a 400 before routing.
     pub with: Option<CreateSessionBody>,
     /// The source delete that ends the replace may proceed only while nothing
     /// is alive: set when the question (or, with confirmations skipped, the

@@ -1823,7 +1823,6 @@ async fn create_session_request(
             FreshCreateContext {
                 intent_key,
                 client_identity,
-                accept_result: None,
                 origin,
                 approved,
             },
@@ -1878,8 +1877,8 @@ async fn create_session_request(
             origin,
             // A REST create takes whatever session the target answers with,
             // replays included: the client asked for a session on that host
-            // and the reply names one. Only the relay's clone has a result
-            // it must refuse.
+            // and the reply names one. Only the relay's clone and Replace
+            // have a result they must refuse.
             accept_result: None,
             github_checkout: None,
             confirm_yolo: req.confirm_yolo,
@@ -2193,7 +2192,6 @@ async fn record_created_history(
         let manager = Arc::clone(&state.manager);
         let captured = claim.clone();
         let environment = environment_target.is_some();
-        let user_checkout = user_launch && github_repo.is_some();
         let ordinary_scope = if user_launch {
             store::HistoryScope::All
         } else {
@@ -2231,10 +2229,14 @@ async fn record_created_history(
                                         manager::HostState::Connected { identity, .. }
                                             if identity == &captured.identity)
                             })?;
+                            // A session-owned host takes history only from
+                            // the launch that created its environment. Every
+                            // later create there (a Replace, an agent's
+                            // create) records none, which keeps the
+                            // environment's original setup and folder
+                            // suggestions intact.
                             let scope = if environment || !status.is_session_owned {
                                 ordinary_scope
-                            } else if user_checkout {
-                                store::HistoryScope::RepositoryOnly
                             } else {
                                 return None;
                             };
@@ -2291,9 +2293,11 @@ pub(crate) struct CreateSpec {
     /// target says it created, which is the REST edge's position: it asked
     /// for a session and any session is the answer.
     ///
-    /// The one producer is the agent relay's `Clone`, whose result must not
-    /// be the ASKING session; see [`do_create_session`]'s "Two phases" note
-    /// for why the check cannot simply run at the call site afterwards.
+    /// The producers are the agent relay's `Clone`, whose result must not
+    /// be the ASKING session, and Replace, whose result must not be its
+    /// SOURCE (`replacement_result_check`); see [`do_create_session`]'s "Two
+    /// phases" note for why the check cannot simply run at the call site
+    /// afterwards.
     pub(crate) accept_result: Option<CreatedSessionCheck>,
     /// Start a YOLO launch even though its host asks before YOLO launches: the caller
     /// confirmed it explicitly (the desktop app's confirmation, the command line's flag). See
@@ -2383,47 +2387,15 @@ pub(crate) fn mode_from_source(
     }
 }
 
-/// Create and replacement share the same fresh-intent admission protocol.
-/// Authority and reply enrichment precede any recovery that could launch a
-/// pending request. Original identity/provenance is captured before selector
-/// consumption or title normalization. A local resolution failure may race
-/// another create, so only a supervisor-settled refusal permits resubmission;
-/// a concurrent winner instead receives ordinary acceptance bookkeeping.
-///
-/// The refusal branch ends before dispatch. Transport errors, rejected
-/// returned sessions, history writes and replacement deletion cannot enter it.
-async fn create_fresh_session(
-    state: &AppState,
-    claim: &manager::SessionClaim,
-    client: &SupervisorClient,
-    req: CreateReq,
-    intent_key: Option<String>,
-    client_identity: String,
-    accept_result: Option<CreatedSessionCheck>,
-) -> anyhow::Result<farhelm_proto::SessionInfo> {
-    create_fresh_session_resolved(
-        state,
-        claim,
-        client,
-        req,
-        FreshCreateContext {
-            intent_key,
-            client_identity,
-            accept_result,
-            origin: CreateOrigin::User,
-            approved: None,
-        },
-    )
-    .await
-}
-
 /// Authority and retry inputs beside a fresh request. A pre-resolved mode
 /// belongs to the agent path and retains the trust choice shown on its card;
 /// a client's choice must compile only after lookup.
+///
+/// It has no result veto ([`CreateSpec::accept_result`]): the creates that
+/// carry one, Replace and agent clone, never start a new managed checkout.
 struct FreshCreateContext {
     intent_key: Option<String>,
     client_identity: String,
-    accept_result: Option<CreatedSessionCheck>,
     origin: CreateOrigin,
     approved: Option<TrustResolvedLaunch>,
 }
@@ -2431,6 +2403,15 @@ struct FreshCreateContext {
 /// Fresh admission after either a client choice or an approved agent
 /// request. Lookup precedes launch compilation; agents supply their already
 /// resolved launch and cannot record a GUI selection or override YOLO.
+///
+/// Authority and reply enrichment precede any recovery that could launch a
+/// pending request. Original identity/provenance is captured before selector
+/// consumption or title normalization. A local resolution failure may race
+/// another create, so only a supervisor-settled refusal permits resubmission;
+/// a concurrent winner instead receives ordinary acceptance bookkeeping.
+///
+/// The refusal branch ends before dispatch. Transport errors, rejected
+/// returned sessions and history writes cannot enter it.
 async fn create_fresh_session_resolved(
     state: &AppState,
     claim: &manager::SessionClaim,
@@ -2447,7 +2428,6 @@ async fn create_fresh_session_resolved(
     let FreshCreateContext {
         intent_key,
         client_identity,
-        accept_result,
         origin,
         approved,
     } = context;
@@ -2461,7 +2441,7 @@ async fn create_fresh_session_resolved(
         origin,
         github_repo: Some(farhelm_proto::parse_github_repo(&checkout.repo)?),
         requested_cwd: req.cwd.clone(),
-        accept_result,
+        accept_result: None,
         // The request's own structured choice, as the user submitted it, in
         // the same durable form an uninterrupted create records (this path
         // may accept a lost-reply retry without compiling anything).
@@ -2684,7 +2664,6 @@ pub(crate) async fn create_agent_checkout(
         FreshCreateContext {
             intent_key,
             client_identity,
-            accept_result: None,
             origin: CreateOrigin::Agent {
                 agent_wrapper_supplied: resolution.agent_wrapper_supplied,
                 wrapper_approved,
@@ -4597,14 +4576,24 @@ pub(crate) struct ReplaceReq {
     /// [`do_replace_session`]'s doc for that path; a legacy source is
     /// refused there).
     ///
-    /// Present, this field's `cwd`/`title`/`cols`/`rows` and launch selector
+    /// Present, this field's `title`/`cols`/`rows` and launch selector
     /// (`command`/`launch`) are resolved exactly as an ordinary
     /// `POST /api/sessions` body's are —
     /// including its own mutual-exclusivity and compatibility refusals
-    /// (`create_mode`) — and used in place of the source's live row. Two
+    /// (`create_mode`) — and used in place of the source's live row. Four
     /// fields on it mean something DIFFERENT here than on an ordinary
     /// create, because replace-with is deliberately not an ordinary create:
+    /// it keeps the source's destination (SPEC.md, "Replace with"), so none
+    /// of the first three may point anywhere the source is not.
     ///
+    /// - `cwd`: required as on any create body, but it must be exactly the
+    ///   source's own `cwd` as the owning host lists it now (byte-for-byte,
+    ///   no path normalization); anything else is refused with `Conflict`
+    ///   before anything is created. Clone is the way to start a session in
+    ///   another folder.
+    /// - `github_checkout`: a replacement never starts in a new managed
+    ///   checkout, so any value is refused with `InvalidRequest` (400) before
+    ///   routing, ahead of every other check on the body.
     /// - `host`: replace never changes machine (SPEC.md's contrast with
     ///   clone, which is the one way to start a session elsewhere). A
     ///   `with.host` naming anything other than the SOURCE's own host (the
@@ -4690,19 +4679,17 @@ pub(crate) struct ReplaceReq {
 /// ## "Replace with", and what stays true either way
 ///
 /// `with` (see [`ReplaceReq::with`]) overrides WHAT the create half
-/// launches — cwd, title, agent, dimensions — never WHERE: the source's own
-/// host and connection (`claim` below) are used for both the create and the
-/// delete regardless of `with`, and a `with.host` naming a different host is
-/// refused before either mutation runs. Everything from the create call
-/// onward in this function's doc above — the idempotency-replay veto, the
-/// delete, its two failure shapes, `forget_session` — is unchanged by
-/// `with`'s presence; only the `CreateSpec` fields feeding that create
-/// differ.
-///
-/// A fresh-checkout override has one additional phase: lookup of the original
-/// source-bound request before mutable launch or checkout configuration is
-/// resolved. A recorded result uses its durable snapshot; an unknown key must
-/// still satisfy the accepted preview's current incarnation and revision.
+/// launches — title, agent or command, prompt, dimensions — never WHERE
+/// (SPEC.md, "Replace with"): the source's own host and connection (`claim`
+/// below) are used for both the create and the delete regardless of `with`,
+/// and the replacement starts in the source's own folder. Each way of asking
+/// for somewhere else is refused before either mutation runs: a
+/// `with.github_checkout` before routing, a `with.host` naming a different
+/// host against the claim, and a `with.cwd` differing from the source's live
+/// row once that row is read. Everything from the create call onward in this
+/// function's doc above — the idempotency-replay veto, the delete, its two
+/// failure shapes, `forget_session` — is unchanged by `with`'s presence; only
+/// the `CreateSpec` fields feeding that create differ.
 pub(crate) async fn do_replace_session(
     state: &AppState,
     key: &store::SessionKey,
@@ -4772,35 +4759,25 @@ async fn replace_session_inner(
     // round trip first. Two keys naming one intended create is the other
     // shape refused here: an ambiguity this route resolves by refusing
     // rather than silently picking one; see `ReplaceReq::with`'s own doc
-    // for why the wire even has two fields that could disagree. Fresh mode
-    // compilation waits for lookup below; repository syntax and key ambiguity
-    // remain local refusals even for fresh requests.
+    // for why the wire even has two fields that could disagree.
     let mut with = with;
     let with_mode = match with.as_mut() {
         Some(with) => {
-            // The same fresh-checkout resolution the create route applies,
-            // for the same reason: "replace with" reuses the create body
-            // verbatim, and a github_checkout field on it must be resolved
-            // (or refused loudly), never silently dropped. The replacement
-            // lands on the SOURCE's host — the claim both halves share.
-            if let Some(checkout) = with.github_checkout.as_ref()
-                && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
-            {
-                return Err(anyhow::Error::new(SupervisorError::helm(
-                    ErrorKind::InvalidRequest,
-                    format!(
-                        "invalid GitHub repository {:?}: {error}",
-                        truncate_repo_text(&checkout.repo)
-                    ),
-                )));
-            }
+            // Replace with keeps the source's destination (SPEC.md,
+            // "Replace with" and "Managed checkouts"), so a body asking for a
+            // new managed checkout is not a replace at all. Refused first and
+            // without routing: the field alone decides it, whatever else the
+            // body says, and silently dropping it would launch in a folder the
+            // caller did not ask for.
             if with.github_checkout.is_some() {
-                // A recorded fresh intent must reconcile before today's
-                // catalog is allowed to compile or refuse its launch.
-                None
-            } else {
-                Some(create_mode(&state.store, with).await?)
+                return Err(invalid_request(
+                    "replace with keeps the source session's own folder and cannot start the \
+                     replacement in a new managed checkout; clone is the way to start a \
+                     session in a new managed checkout"
+                        .to_string(),
+                ));
             }
+            Some(create_mode(&state.store, with).await?)
         }
         None => None,
     };
@@ -4837,21 +4814,6 @@ async fn replace_session_inner(
             ),
         )));
     }
-    if with
-        .as_ref()
-        .is_some_and(|req| req.github_checkout.is_some())
-    {
-        return replace_with_fresh_checkout(
-            state,
-            &claim,
-            &client,
-            id,
-            intent_key,
-            with.expect("fresh body checked above"),
-            guard,
-        )
-        .await;
-    }
     crate::precondition::incarnation_holds(
         &claim,
         with.as_ref().and_then(|with| with.expected_incarnation),
@@ -4879,6 +4841,25 @@ async fn replace_session_inner(
             ))
         })?;
     refuse_retired_source(&source)?;
+    // "Replace with" keeps the source's folder as well as its host, so the
+    // body's cwd must name the folder this live row says the source is in.
+    // Compared as exact text, with no path normalization: both desktop
+    // callers send the listed `cwd` verbatim, so an honest Replace with
+    // always matches, and anything else is a request to move the session.
+    // A 409 like the host refusal above, since both say the request
+    // contradicts where the source actually is.
+    if let Some(with) = &with
+        && with.cwd != source.cwd
+    {
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            format!(
+                "replace with keeps the source session's own folder ({:?}); it cannot move a \
+                 session to another folder ({:?}) — clone is the way to start one elsewhere",
+                source.cwd, with.cwd
+            ),
+        )));
+    }
     // The create half's fields: from the override body when "replace with"
     // supplied one (its mode already resolved at the top of this function,
     // ahead of routing), otherwise derived from the source's own live row
@@ -5003,64 +4984,10 @@ fn replacement_result_check(id: &str) -> CreatedSessionCheck {
     })
 }
 
-/// Reconcile fresh replacements against their original request and source.
-/// Current incarnation/configuration/catalog checks apply only to unknown
-/// intents. The accepted installation is checked even for known keys, and a
-/// live source is still required, preserving replace's existing 404 contract
-/// after a fully completed operation. Neither lookup nor creation may bypass
-/// the source-id veto or change the connection used by the delete half.
-async fn replace_with_fresh_checkout(
-    state: &AppState,
-    claim: &manager::SessionClaim,
-    client: &SupervisorClient,
-    id: &str,
-    intent_key: Option<String>,
-    req: CreateReq,
-    guard: farhelm_proto::DeleteGuard,
-) -> anyhow::Result<Replaced> {
-    let client_identity = serde_json::to_string(&(
-        "github_replace_request_v1",
-        id,
-        fresh_create_request_identity(&req),
-    ))
-    .expect("replacement identity contains only serializable fields");
-    accepted_checkout_preview(
-        req.github_checkout
-            .as_ref()
-            .expect("fresh replacement has checkout intent"),
-        claim,
-    )?;
-    // Lookup may resume an accepted pending create, so establish the source's
-    // continued existence first. This read does not resolve launch settings.
-    let source = manager::drain_sessions(client, claim.host)
-        .await?
-        .sessions
-        .into_iter()
-        .map(store::CachedRow::into_info)
-        .find(|session| session.id == id)
-        .ok_or_else(|| {
-            SupervisorError::helm(
-                ErrorKind::NotFound,
-                "this session's own host no longer lists it, so there is nothing to replace".into(),
-            )
-        })?;
-    refuse_retired_source(&source)?;
-    let created = create_fresh_session(
-        state,
-        claim,
-        client,
-        req,
-        intent_key,
-        client_identity,
-        Some(replacement_result_check(id)),
-    )
-    .await?;
-    finish_replacement(state, claim, client, id, created, guard).await
-}
-
-/// Delete the source only after a replacement has passed acceptance. Both a
-/// newly created session and a reconciled one use this tail so lost delete
-/// replies retain the same definite-versus-ambiguous failure reporting.
+/// Replace's delete half: remove the source only after its replacement has
+/// passed acceptance, carrying the source's viewer state over first, and
+/// report a failed removal as definite or ambiguous (see
+/// [`do_replace_session`]'s doc for the two shapes).
 async fn finish_replacement(
     state: &AppState,
     claim: &manager::SessionClaim,
@@ -5069,10 +4996,6 @@ async fn finish_replacement(
     created: farhelm_proto::SessionInfo,
     guard: farhelm_proto::DeleteGuard,
 ) -> anyhow::Result<Replaced> {
-    // A replacement in the same folder keeps its source's checkout, but one
-    // with an overridden folder or a fresh checkout can release the source's
-    // last reference, and that delete's notice must reach the user like any
-    // other Delete's (SPEC.md "Managed checkouts").
     // As for an ordinary delete: requests the source has waiting for the
     // user, or on their way to a card, would otherwise hold the delete behind
     // their request fence. Held until the delete answers.
@@ -5093,6 +5016,12 @@ async fn finish_replacement(
         }
         deleting
     };
+    // Replace keeps the source's folder, so the replacement normally keeps
+    // the source's checkout referenced and this delete releases nothing. Its
+    // notice is still the host's answer to a Delete, and SPEC.md ("Managed
+    // checkouts") shows a checkout notice wherever a Delete's result is
+    // shown, so whatever the host reports is passed on rather than assumed
+    // away.
     let delete_notice = match client.delete_session_with(id, guard).await {
         Ok(outcome) => {
             // As for Delete: an archived source checkout is new Trash content.
@@ -5181,7 +5110,8 @@ pub(crate) struct Replaced {
 /// `POST /api/sessions/{id}/replace` — recreate `id` under a brand-new id on
 /// the same host, then remove `id` (SPEC.md's "replace"). Absent `with`,
 /// the replacement carries the same directory, title, and agent as `id`; a
-/// present `with` overrides any of those instead (SPEC.md's "replace with").
+/// present `with` overrides the title and launch instead, while the host and
+/// directory stay `id`'s own (SPEC.md's "replace with").
 /// See [`do_replace_session`] for the operation and its failure rule.
 pub(crate) async fn replace_session(
     State(state): State<Arc<AppState>>,
