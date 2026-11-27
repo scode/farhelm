@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-visible-consent`](reports/launcher-visible-consent.report.md) landed 2026-11-26 in #5081, #5082: Lock host and destination in Replace with and record launcher list Enter visibility rule
 - [`podman-host-verification`](reports/podman-host-verification.report.md) landed 2026-11-26 in #5084: Verify container host identity with cheap sanity checks and record concurrent SSH config policy
 - [`supervisor-outliving-programs`](reports/supervisor-outliving-programs.report.md) landed 2026-11-26 in #5083: Root Stop and Restart cleanup at surviving pinned children and record SIGHUP/SIGKILL policy
 - [`supervisor-tab-close-retry`](reports/supervisor-tab-close-retry.report.md) landed 2026-11-26 in #5087: Fix in-memory shell-tab close retry bugs and record Linux systemd/unscoped cleanup policy
