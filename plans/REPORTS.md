@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`tensorlake-setup-and-repo-cache-fixes`](reports/tensorlake-setup-and-repo-cache-fixes.report.md) landed 2026-11-25 in #4964, #4972, #4974: Isolate repository-cache startup sweep errors, refuse Tensorlake setup reruns on suspended or deleting sandboxes, and assert setup never reads agent settings
 - [`tab-switch-shortcuts`](reports/tab-switch-shortcuts.report.md) landed 2026-11-25 in #4983, #4989: Add Cmd+Shift+[ / Cmd+Shift+] (Ctrl+Shift+[ / Ctrl+Shift+] on Linux) to switch between terminal tabs within a session
 - [`recipe-card-and-billed-size-fixes`](reports/recipe-card-and-billed-size-fixes.report.md) landed 2026-11-25 in #4980, #4988: Hide removed failure-only container hosts on recipe cards and bind Tensorlake launch consent to the billed size shown
 - [`drop-post-clone-claude-trust`](reports/drop-post-clone-claude-trust.report.md) landed 2026-11-25 in #4992, #4998: Move Claude workspace-trust editing from managed-checkout preparation to Claude launch while preserving archive-time removal
