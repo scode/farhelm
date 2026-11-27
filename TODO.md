@@ -225,13 +225,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Credentials for ordinary SSH hosts.** The Credentials section of Settings serves environments through their recipes.
   Extend it so ordinary SSH hosts can use the same named credentials.
 
-- **Cut the new desktop app's idle CPU with a large running fleet.** With the session list now drawing only the rows on
-  screen, idle CPU no longer depends on how many sessions are listed, and typing stays at about 30 ms at any fleet size.
-  But it still grows with how many sessions are running: on the test Mac, 1.6% with 5 sessions, 3.3-3.5% with 179 of 200
-  running and 5.3-5.4% with 449 of 500 running, against the old app's 1.6% idle. Most of it remains when the window is
-  in the background, so it comes from applying the helm's updates for running sessions, not from drawing. Asked for on
-  2026-11-14; first measure the old app with 200 running sessions for a fair comparison, then profile what each update
-  costs in the app.
+- **Cut the new desktop app's idle CPU with a large running fleet.** The helm's part is done (#5111 to #5120): a running
+  fleet used to make the embedded helm refresh a host and recompute everything the window shows about once a second, and
+  now does so about once every ten seconds. Measured on 2026-11-26 on the shared test Mac's VM, with 500 sessions on one
+  remote host, before and after that stack (VM numbers, not comparable with the older figures from the physical test
+  Mac): running fleet, window in front, 6.7% to 5.3%; running, window in the background, 4.1% to 2.5%; idle fleet in
+  front, 3.7% to 3.1%; idle in the background, 1.1% to 0.7%. With the fleet running and the window in the background,
+  the helm went from about 64% of the app's samples to about 9%. Nearly all of what is left is whole-window redraws:
+  about one frame a second in the background (the open session's terminal kept printing), about 3.5 a second in front
+  with a running fleet (the running pulse) and about 3 with an idle one (the cursor blink). A frame costs about the same
+  at any fleet size, except the session list's per-frame pass over every session, which the investigation measured at
+  about 1.75 ms per frame with 12 sessions and 3 ms with 500. With nothing drawn, most of what remains was GPUI's
+  display link waking the app on every display refresh. `lore/2026-11-26-desktop-idle-cpu.md` has the investigation's
+  measurements and ranks the remaining fixes; the Maybe later entry "Revisit the desktop app idle CPU findings" tracks
+  the same fixes, and cheaper frames overlap with "Idle CPU of the GPUI desktop app". Asked for on 2026-11-14; narrowed
+  to what remains on 2026-11-26.
 
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
