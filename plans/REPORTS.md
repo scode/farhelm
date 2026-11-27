@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-late-wake-failures`](reports/launcher-late-wake-failures.report.md) landed 2026-11-26 in #5079, #5092: Report request-tagged late wake failures for suspended sandboxes and stopped containers
 - [`supervisor-stop-pending-launch`](reports/supervisor-stop-pending-launch.report.md) landed 2026-11-26 in #5091: Refuse Stop on unconfirmed terminal-less launches in favor of Delete or Restart
 - [`drift-updater-teardown`](reports/drift-updater-teardown.report.md) landed 2026-11-26 in #5093: Run drift-test agent updaters in transient systemd user scopes for clean teardown
 - [`podman-recipe-admission`](reports/podman-recipe-admission.report.md) landed 2026-11-27 in #5094: Report pre-admission container recipe Rebuild failures without creating empty build records
