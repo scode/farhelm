@@ -99,6 +99,7 @@ enum Verdict {
     Allow(oneshot::Sender<()>),
     HostAdd {
         destination: String,
+        tailscale: bool,
         receipt: oneshot::Sender<()>,
     },
     TunnelAndOpen(oneshot::Sender<()>),
@@ -421,8 +422,11 @@ pub(crate) enum Allowed {
     Tunnel,
     /// The answer POST waits on this receipt. Only the host-add handler,
     /// after its final origin check, may release the GUI's discovery step.
+    /// `destination` and `tailscale` are the user's answered values, which
+    /// the dialog will probe, not the agent's request.
     HostAdd {
         destination: String,
+        tailscale: bool,
         receipt: oneshot::Sender<()>,
     },
 }
@@ -568,9 +572,11 @@ pub(crate) async fn ask_with_answer(
         }
         Ending::Answered(Some(Verdict::HostAdd {
             destination,
+            tailscale,
             receipt,
         })) => Ok(Allowed::HostAdd {
             destination,
+            tailscale,
             receipt,
         }),
         Ending::Answered(Some(Verdict::TunnelAndOpen(receipt))) => {
@@ -724,6 +730,9 @@ pub(crate) async fn list_approvals(
 /// A 204 means the waiter took the answer. For Host Add Allow, the receipt
 /// also confirms the final origin check. A 410 tells the client to drop the
 /// card because the request was answered elsewhere, expired or was withdrawn.
+/// A Host Add Allow whose edited destination is out of bounds, or that
+/// chooses Tailscale for a destination Tailscale mode refuses, is a 400 that
+/// leaves the card waiting.
 ///
 /// Each "Always allow" choice first stores its selected host permission, then
 /// approves this request. It is refused (409, the card keeps waiting with
@@ -763,11 +772,22 @@ pub(crate) async fn answer_approval(
     {
         return http_error(refusal(ErrorKind::InvalidRequest, message));
     }
+    // The same Tailscale shape check the agent's request passed, now on the
+    // user's edit: the destination or the checkbox may have changed in the
+    // dialog, and the helm does not take the client's word that the pair is
+    // usable. Refused here, the card stays answerable for a corrected edit.
+    if let Some(edited) = &request.host_add
+        && edited.tailscale
+        && let Err(error) = crate::ssh::tailscale::destination_host(&edited.destination)
+    {
+        return http_error(refusal(ErrorKind::InvalidRequest, error.to_string()));
+    }
     let (receipt_tx, receipt_rx) = oneshot::channel();
     let verdict = match request.answer {
         ApprovalAnswer::Allow => match request.host_add {
             Some(edited) => Verdict::HostAdd {
                 destination: edited.destination,
+                tailscale: edited.tailscale,
                 receipt: receipt_tx,
             },
             None => Verdict::Allow(receipt_tx),
@@ -996,7 +1016,7 @@ pub(crate) mod tests {
             &harness,
             "POST",
             &format!("/api/approvals/{id}"),
-            Some(serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}})),
+            Some(serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited", "tailscale":false}})),
         )
         .await;
         assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
@@ -1025,6 +1045,7 @@ pub(crate) mod tests {
                 ApprovalAction::HostAdd {
                     destination: "user@original".into(),
                     alias: None,
+                    tailscale: false,
                 },
             )
             .await;
@@ -1047,7 +1068,7 @@ pub(crate) mod tests {
                 "POST",
                 &format!("/api/approvals/{id}"),
                 Some(
-                    serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}}),
+                    serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited", "tailscale":false}}),
                 ),
             )
             .await;
@@ -1086,6 +1107,7 @@ pub(crate) mod tests {
             ApprovalAction::HostAdd {
                 destination: "user@original".into(),
                 alias: None,
+                tailscale: false,
             },
         )
         .await;
@@ -1099,7 +1121,7 @@ pub(crate) mod tests {
                 "POST",
                 &format!("/api/approvals/{id}"),
                 Some(
-                    serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}})
+                    serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited", "tailscale":false}})
                 )
             )
             .await
@@ -2062,6 +2084,7 @@ pub(crate) mod tests {
                 ApprovalAction::HostAdd {
                     destination: "user@new-host".into(),
                     alias: None,
+                    tailscale: false,
                 },
             ),
             (

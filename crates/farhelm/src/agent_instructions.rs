@@ -236,10 +236,14 @@ fn render(agent: &Command) -> String {
          The helm must be reachable even when either permission skips the card.\n\
          A template write containing a wrapper still needs one explicit Allow, and host add,\n\
          host edit and host remove always do, whatever the user set for this host.\n\
-         host add DEST [--alias NAME] opens the user's ordinary add dialog. The user can edit\n\
-         both fields before approving. Accepted names the approved destination, not necessarily\n\
-         your original argument. Accepted is not installed: adding may fail, need setup, or be\n\
-         cancelled. Check farhelm agent hosts and the host's state before relying on it.\n\
+         host add DEST [--alias NAME] [--tailscale] opens the user's ordinary add dialog;\n\
+         --tailscale pre-checks its Tailscale host option, and DEST must then be a Tailscale\n\
+         node name, DNS name or IP address, optionally login@. The user can edit both fields\n\
+         and the option before approving. Accepted names the approved destination, not\n\
+         necessarily your original argument, and says \"with Tailscale\" exactly when the\n\
+         user approved that option. Accepted is not installed: adding may fail, need setup, or be\n\
+         cancelled. Check farhelm agent hosts and the host's state before relying on it;\n\
+         hosts --json shows whether each host uses Tailscale.\n\
          host edit HOST changes only alias, icon and color; host remove HOST forgets it while\n\
          its supervisor and sessions keep running. You cannot remove this machine or your own host.\n\
          Listings and instructions never wait. Run acting verbs with a tool timeout of at least\n\
@@ -842,16 +846,18 @@ mod tests {
     /// above cannot see it at all.
     ///
     /// `stop` is padded to the column the widest verb under
-    /// [`MAX_USAGE_WIDTH`] sets, currently `host add`; adding a wider one
-    /// moves that column and this literal with it. `rename` is past the
-    /// cap, so its description follows two spaces after it either way.
+    /// [`MAX_USAGE_WIDTH`] sets, currently `stop` itself, so it carries no
+    /// padding; adding a wider one under the cap moves that column and this
+    /// literal with it (`host add` set it until `--tailscale` took it past
+    /// the cap). `rename` is past the cap, so its description follows two
+    /// spaces after it either way.
     #[farhelm_testtrace::test]
     fn a_lifecycle_verb_with_arguments_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
             "farhelm agent rename <TITLE> --session <SESSION> --expected-title <EXPECTED_TITLE>  \
              Rename an explicitly named session if its title is unchanged",
-            "farhelm agent stop --session <SESSION>          \
+            "farhelm agent stop --session <SESSION>  \
              Stop a named session's agent and close its terminal tabs",
         ] {
             assert!(

@@ -558,6 +558,7 @@ fn every_kind() -> Vec<PendingApproval> {
         ApprovalAction::HostAdd {
             destination: format!("ops@{}example", "long-host-name.".repeat(8)),
             alias: Some("new".into()),
+            tailscale: false,
         },
         ApprovalAction::HostEdit {
             host_name: "build-box".into(),
@@ -1405,6 +1406,7 @@ fn an_agents_host_add_arriving_leaves_a_typed_add_host_draft_alone(cx: &mut Test
     add.action = ApprovalAction::HostAdd {
         destination: "ops@new.example".to_owned(),
         alias: Some("newbox".to_owned()),
+        tailscale: false,
     };
     push(&mut helm, &[add], &[]);
     settle(cx);
@@ -1434,6 +1436,7 @@ fn a_held_enter_that_opened_add_host_cannot_approve_it(cx: &mut TestAppContext) 
     add.action = ApprovalAction::HostAdd {
         destination: "ops@new.example".to_owned(),
         alias: Some("newbox".to_owned()),
+        tailscale: false,
     };
     let (mut helm, cx, _terminal) = open(cx, &[add]);
     let opener = "approval-add-1-answer-allow";
@@ -1480,6 +1483,6 @@ fn a_held_enter_that_opened_add_host_cannot_approve_it(cx: &mut TestAppContext) 
     let (_, body) = one_command(&mut helm, Method::Post, "/api/approvals/add-1");
     assert_eq!(
         body,
-        json!({ "answer": "allow", "host_add": { "destination": "ops@new.example" } })
+        json!({ "answer": "allow", "host_add": { "destination": "ops@new.example", "tailscale": false } })
     );
 }

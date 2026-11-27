@@ -181,7 +181,9 @@ fn probe_refused(words: &str) -> Outcome {
 
 /// The Add host dialog as an approval card opens it for an agent's host add (no reference screen: the old app's dialog
 /// for an agent was the same dialog with two unstyled description lists): who asked, what Add approves, and the fields
-/// prefilled with the request's destination and alias. Pins the agent's lines above the ordinary fields.
+/// prefilled with the request's destination and alias. The request asks for Tailscale, so the scene also pins the
+/// Tailscale host checkbox pre-checked and the "Tailscale host" line among what Add approves. Pins the agent's lines
+/// above the ordinary fields.
 pub(super) fn host_add_dialog_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     use farhelm_proto::approvals::{ApprovalAction, ApprovalSession, PendingApproval};
     use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
@@ -199,6 +201,7 @@ pub(super) fn host_add_dialog_agent_setup(state: &SceneState, window: &mut Windo
         action: ApprovalAction::HostAdd {
             destination: "ops@new-box.example".to_owned(),
             alias: Some("new-box".to_owned()),
+            tailscale: true,
         },
         own_host_session_action: false,
         expires_at_ms: 1,

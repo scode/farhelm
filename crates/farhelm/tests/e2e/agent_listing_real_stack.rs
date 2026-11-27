@@ -336,7 +336,7 @@ async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
             "premise: CLI still held"
         );
         let body = if answer == "allow" {
-            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@approved.invalid"}})
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@approved.invalid", "tailscale":false}})
         } else {
             serde_json::json!({"answer":"deny"})
         };

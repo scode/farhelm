@@ -616,10 +616,19 @@ pub fn facts(action: &ApprovalAction) -> Vec<Fact> {
                 None => {}
             }
         }
-        ApprovalAction::HostAdd { destination, alias } => {
+        // An agent's Tailscale request shows only when made, as an alias does; the add dialog then shows the choice
+        // either way, since that is where the user settles it.
+        ApprovalAction::HostAdd {
+            destination,
+            alias,
+            tailscale,
+        } => {
             facts.push(value("ssh destination", destination));
             if let Some(alias) = alias {
                 facts.push(value("alias", alias));
+            }
+            if *tailscale {
+                facts.push(Fact::Words("tailscale host", "yes"));
             }
         }
         // Each changed field shows its value now and the value approval writes; a field the request leaves alone is

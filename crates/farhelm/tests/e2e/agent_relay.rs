@@ -143,6 +143,7 @@ impl AgentRequestHandler for ScriptedHandler {
                         kind: "local".to_string(),
                         state: "connected".to_string(),
                         current: true,
+                        tailscale: false,
                     }],
                     complete: true,
                 },
@@ -397,6 +398,7 @@ async fn an_agent_request_from_an_unattached_session_is_answered_by_the_owning_h
             kind: "local".to_string(),
             state: "connected".to_string(),
             current: true,
+            tailscale: false,
         }],
         complete: true,
     });

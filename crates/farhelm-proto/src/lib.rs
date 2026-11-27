@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_91` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_92` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 91;
+pub const PROTOCOL_VERSION: u32 = 92;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -2199,6 +2199,16 @@ pub enum AgentVerb {
         destination: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         alias: Option<String>,
+        /// `--tailscale`: ask for the dialog's Tailscale host option, which
+        /// reaches the host through the local Tailscale daemon instead of
+        /// ordinary SSH resolution. It is a request, not a setting: the card
+        /// shows it, the dialog starts with the option checked, and the user's
+        /// final choice is what [`AgentReply::HostAddAccepted`] reports. The
+        /// helm refuses a destination Tailscale mode cannot use before it
+        /// raises a card. Added with `PROTOCOL_VERSION` 92, because an older
+        /// helm would drop the field and add the host as ordinary SSH.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tailscale: bool,
     },
     /// `farhelm agent host edit`: change a host's alias, icon or color, and
     /// nothing else. Answered with [`AgentReply::HostEdited`].
@@ -2607,9 +2617,20 @@ pub enum AgentReply {
     TemplateWritten { template: Box<AgentTemplate> },
     /// A template delete's confirmation, carrying nothing beyond success.
     TemplateDeleted {},
-    /// The user approved this edited destination. Installation is not
-    /// promised; the answering GUI continues the ordinary add flow.
-    HostAddAccepted { destination: String },
+    /// The user approved this edited destination and Tailscale choice.
+    /// Installation is not promised; the answering GUI continues the
+    /// ordinary add flow.
+    ///
+    /// Both fields are the user's answer, not an echo of the request: the
+    /// user can edit the destination and toggle Tailscale before clicking
+    /// Add, so the caller learns here what the approved add (and its first
+    /// probe) uses. If setup is then refused and the user changes the
+    /// reopened dialog, that later Add is an ordinary one the agent is not
+    /// told about; `farhelm agent hosts` shows what was added.
+    HostAddAccepted {
+        destination: String,
+        tailscale: bool,
+    },
     /// Answers `HostEdit` with the host as the listing now shows it, so the
     /// caller learns the display name an alias change gave it.
     HostEdited { host: AgentHost },
@@ -2703,6 +2724,12 @@ pub struct AgentHost {
     /// from the connection the upcall arrived on, which is by construction
     /// that host's connection.
     pub current: bool,
+    /// True for an SSH host the helm reaches through the local Tailscale
+    /// daemon (the Add host dialog's Tailscale host option), false for every
+    /// other host. It lets an agent check that a `host add --tailscale` it
+    /// asked for was added that way. It says how the helm connects, not
+    /// where: the destination itself stays private, as above.
+    pub tailscale: bool,
 }
 
 /// One session, as an agent sees it.
@@ -6033,6 +6060,8 @@ mod tests {
     /// Version 89 requires the agent relay to honor a named conversation on Create. An older helm would ignore it.
     /// Version 90 adds the Agents verb and reply. Older relays cannot decode their tags.
     /// Version 91 removes supervisor repository discovery. Suggestions use the helm's launch history.
+    /// Version 92 adds the Tailscale request to agent host add. An older helm would ignore it and add the
+    /// host as ordinary SSH.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6043,8 +6072,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_91() {
-        assert_eq!(PROTOCOL_VERSION, 91);
+    fn protocol_version_is_pinned_at_92() {
+        assert_eq!(PROTOCOL_VERSION, 92);
     }
 
     /// Discovery is a read-only relay with a fixed reply tag and only the fields needed to choose
@@ -6318,13 +6347,17 @@ mod tests {
     /// Spec: the host verbs travel under their own `verb` tags with the alias
     /// as an explicit set-or-clear, omit fields they leave alone, and count
     /// as mutations that may wait for the user; their replies have tags of
-    /// their own.
+    /// their own. Host add's Tailscale request is present on the wire only
+    /// when asked for, and its accepted reply always says whether Tailscale
+    /// was chosen.
     ///
     /// Why: an omitted alias, icon or color means "leave it as it is", so a
     /// field that appeared on the wire as `null` when unset would turn into
     /// a clear at a decoder that read it differently. Counting these verbs as
     /// mutations is what keeps a lost answer from being reported as a free
     /// retry, and the wait budget is what lets the user's card be answered.
+    /// A Tailscale request that did not reach the helm would add an ordinary
+    /// SSH host instead, so its encoding is pinned here alongside the rest.
     #[farhelm_testtrace::test]
     fn host_verbs_wire_shapes_and_authority_are_explicit() {
         use host_appearance::{HostColor, HostIcon};
@@ -6359,17 +6392,34 @@ mod tests {
         let add = AgentVerb::HostAdd {
             destination: "user@new".into(),
             alias: Some("new".into()),
+            tailscale: false,
         };
         let wire = serde_json::json!({"verb":"host_add", "destination":"user@new", "alias":"new"});
         assert_eq!(serde_json::to_value(&add).unwrap(), wire);
         assert_eq!(serde_json::from_value::<AgentVerb>(wire).unwrap(), add);
-        for verb in [&add, &edit, &clear, &remove] {
+        let tailscale_add = AgentVerb::HostAdd {
+            destination: "dev".into(),
+            alias: None,
+            tailscale: true,
+        };
+        let wire = serde_json::json!({"verb":"host_add", "destination":"dev", "tailscale":true});
+        assert_eq!(serde_json::to_value(&tailscale_add).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<AgentVerb>(wire).unwrap(),
+            tailscale_add
+        );
+        for verb in [&add, &tailscale_add, &edit, &clear, &remove] {
             assert!(verb.is_mutating(), "{verb:?}");
             assert!(verb.may_wait_for_user(), "{verb:?}");
         }
         for reply in [
             AgentReply::HostAddAccepted {
                 destination: "user@approved".into(),
+                tailscale: false,
+            },
+            AgentReply::HostAddAccepted {
+                destination: "approved".into(),
+                tailscale: true,
             },
             AgentReply::HostEdited {
                 host: AgentHost {
@@ -6378,6 +6428,7 @@ mod tests {
                     kind: "ssh".into(),
                     state: "connected".into(),
                     current: false,
+                    tailscale: true,
                 },
             },
             AgentReply::HostRemoved {},
@@ -6390,6 +6441,9 @@ mod tests {
                 ),
                 "{value}"
             );
+            if let AgentReply::HostAddAccepted { tailscale, .. } = &reply {
+                assert_eq!(value["tailscale"], *tailscale, "{value}");
+            }
             assert_eq!(serde_json::from_value::<AgentReply>(value).unwrap(), reply);
         }
     }
@@ -9636,6 +9690,7 @@ mod tests {
                         kind: "ssh".to_string(),
                         state: "connected".to_string(),
                         current: false,
+                        tailscale: false,
                     }],
                     complete: true,
                     caller_host_id: "1".to_string(),
@@ -9660,6 +9715,7 @@ mod tests {
                             "kind": "ssh",
                             "state": "connected",
                             "current": false,
+                            "tailscale": false,
                         }],
                         "complete": true,
                         "caller_host_id": "1",
@@ -10145,10 +10201,11 @@ mod tests {
     /// host it is on, the helm knows only because the upcall arrived on
     /// that host's connection), so a serde change that dropped or defaulted
     /// it would silently mark every row as not-current with nothing else
-    /// looking wrong. `truncated`, `archived` and `stale` are here for the
-    /// same reason in weaker form: each defaults to `false`, which is the
-    /// reassuring answer, so a field lost in serde would read as "complete
-    /// listing, live row, not archived" rather than as an error.
+    /// looking wrong. `truncated`, `archived`, `stale` and a host's
+    /// `tailscale` are here for the same reason in weaker form: each
+    /// defaults to `false`, which is the reassuring answer, so a field lost
+    /// in serde would read as "complete listing, live row, not archived"
+    /// rather than as an error.
     #[farhelm_testtrace::test]
     fn agent_listing_replies_roundtrip() {
         for reply in [
@@ -10160,6 +10217,7 @@ mod tests {
                         kind: "local".to_string(),
                         state: "connected".to_string(),
                         current: true,
+                        tailscale: false,
                     },
                     AgentHost {
                         id: "2".to_string(),
@@ -10167,6 +10225,7 @@ mod tests {
                         kind: "ssh".to_string(),
                         state: "unreachable-reprobing".to_string(),
                         current: false,
+                        tailscale: true,
                     },
                 ],
                 complete: true,

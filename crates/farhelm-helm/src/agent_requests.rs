@@ -867,8 +867,12 @@ impl AgentRequestHandler for HelmAgentRequests {
             ParsedAgentVerb::TemplateDelete { name } => {
                 delete_template_for_agent(&state, origin, session_id, name.into_string()).await
             }
-            ParsedAgentVerb::HostAdd { destination, alias } => {
-                host_add_for_agent(&state, origin, session_id, destination, alias).await
+            ParsedAgentVerb::HostAdd {
+                destination,
+                alias,
+                tailscale,
+            } => {
+                host_add_for_agent(&state, origin, session_id, destination, alias, tailscale).await
             }
             ParsedAgentVerb::HostEdit {
                 host,
@@ -1198,6 +1202,8 @@ enum ParsedAgentVerb {
     HostAdd {
         destination: String,
         alias: Option<String>,
+        /// Already checked against the Tailscale destination rules when true.
+        tailscale: bool,
     },
     Hosts,
     Sessions,
@@ -1290,11 +1296,29 @@ impl ParsedAgentVerb {
                 .transpose()
         };
         Ok(match verb {
-            AgentVerb::HostAdd { destination, alias } => {
+            AgentVerb::HostAdd {
+                destination,
+                alias,
+                tailscale,
+            } => {
                 farhelm_proto::approvals::validate_host_add_destination(&destination)?;
+                // A Tailscale destination is a node name, DNS name or address
+                // with an optional login, a narrower shape than ordinary SSH
+                // accepts (no `ssh://` URL, no port). The add dialog's probe
+                // would refuse anything else only after the user had already
+                // been shown a card for it, so refuse it here, before a card
+                // exists, with the same guidance the dialog would give.
+                if tailscale {
+                    crate::ssh::tailscale::destination_host(&destination)
+                        .map_err(|error| error.to_string())?;
+                }
                 let alias = crate::store::validate_alias(alias.as_deref())
                     .map_err(|error| error.to_string())?;
-                Self::HostAdd { destination, alias }
+                Self::HostAdd {
+                    destination,
+                    alias,
+                    tailscale,
+                }
             }
             AgentVerb::Hosts {} => Self::Hosts,
             AgentVerb::Sessions {} => Self::Sessions,
@@ -3539,23 +3563,32 @@ async fn delete_template_for_agent(
 /// check. The receipt is the last fallible approval step, with no await or
 /// origin veto after it: a successful answer POST permits the GUI to probe.
 /// Discovery and setup still belong to the ordinary GUI flow, not this relay.
+///
+/// `tailscale` is the agent's request and only seeds the card and dialog;
+/// the reply reports the user's answered choice, which may differ.
 async fn host_add_for_agent(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
     destination: String,
     alias: Option<String>,
+    tailscale: bool,
 ) -> anyhow::Result<AgentReply> {
     let answer = crate::approvals::ask_with_answer(
         state,
         origin,
         asking_session,
         false,
-        ApprovalAction::HostAdd { destination, alias },
+        ApprovalAction::HostAdd {
+            destination,
+            alias,
+            tailscale,
+        },
     )
     .await?;
     let crate::approvals::Allowed::HostAdd {
         destination,
+        tailscale,
         receipt,
     } = answer
     else {
@@ -3572,7 +3605,10 @@ async fn host_add_for_agent(
     receipt
         .send(())
         .map_err(|_| anyhow::anyhow!("the host add answer was withdrawn"))?;
-    Ok(AgentReply::HostAddAccepted { destination })
+    Ok(AgentReply::HostAddAccepted {
+        destination,
+        tailscale,
+    })
 }
 
 /// One `host edit` verb's fields, moved out of [`AgentVerb`] so the handler
@@ -5021,6 +5057,7 @@ fn agent_host(view: &crate::hosts::HostView, asking: HostId) -> AgentHost {
         // a state word back to a user who is looking at the panel.
         state: view.state.phase().to_string(),
         current: view.id == asking,
+        tailscale: view.tailscale,
     }
 }
 
@@ -5957,8 +5994,9 @@ mod tests {
     }
 
     /// Spec: a host is reported by its display NAME, its kind word, the
-    /// helm's own phase label, and a `current` flag true for exactly the
-    /// asking session's host.
+    /// helm's own phase label, a `current` flag true for exactly the
+    /// asking session's host, and a `tailscale` flag copied from the host's
+    /// own Tailscale setting without changing its kind word.
     ///
     /// This matters because every later verb an agent gets — create, clone
     /// — names its target by the `name` in this reply, so a projection that
@@ -5988,7 +6026,7 @@ mod tests {
                 refresh: RefreshView::Pending,
             },
         );
-        let unreachable = host_view(
+        let mut unreachable = host_view(
             2,
             "builder",
             "ssh",
@@ -5997,18 +6035,21 @@ mod tests {
                 last_error: "no route".to_string(),
             },
         );
+        unreachable.tailscale = true;
 
         let mine = agent_host(&connected, 1);
         assert_eq!(mine.name, "this machine");
         assert_eq!(mine.kind, "local");
         assert_eq!(mine.state, "connected");
         assert!(mine.current);
+        assert!(!mine.tailscale);
 
         let theirs = agent_host(&unreachable, 1);
         assert_eq!(theirs.name, "builder");
-        assert_eq!(theirs.kind, "ssh");
+        assert_eq!(theirs.kind, "ssh", "Tailscale does not change the kind");
         assert_eq!(theirs.state, "unreachable-reprobing");
         assert!(!theirs.current);
+        assert!(theirs.tailscale);
     }
 
     /// Spec: a session's `agent` label is the supervisor-recorded agent
@@ -15288,6 +15329,7 @@ mod tests {
                 AgentVerb::HostAdd {
                     destination: "user@other".into(),
                     alias: None,
+                    tailscale: false,
                 },
                 AgentVerb::HostEdit {
                     host: remote_name.clone(),
@@ -16616,6 +16658,7 @@ mod tests {
                     AgentVerb::HostAdd {
                         destination: "user@original".into(),
                         alias: Some("  build  ".into()),
+                        tailscale: false,
                     },
                 )
                 .await
@@ -16625,16 +16668,17 @@ mod tests {
             card.action,
             ApprovalAction::HostAdd {
                 destination: "user@original".into(),
-                alias: Some("build".into())
+                alias: Some("build".into()),
+                tailscale: false,
             }
         );
         assert!(card.action.requires_direct_allow());
         for body in [
             serde_json::json!({"answer":"allow"}),
-            serde_json::json!({"answer":"allow", "host_add":{"destination":" "}}),
-            serde_json::json!({"answer":"allow", "host_add":{"destination":"x\ny"}}),
-            serde_json::json!({"answer":"deny", "host_add":{"destination":"user@edited"}}),
-            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited", "alias":"foreign"}}),
+            serde_json::json!({"answer":"allow", "host_add":{"destination":" ", "tailscale":false}}),
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"x\ny", "tailscale":false}}),
+            serde_json::json!({"answer":"deny", "host_add":{"destination":"user@edited", "tailscale":false}}),
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited", "tailscale":false, "alias":"foreign"}}),
         ] {
             assert!(
                 !host_add_answer(h.router(), card.id.clone(), body)
@@ -16652,12 +16696,12 @@ mod tests {
             host_add_answer(
                 h.router(),
                 card.id.clone(),
-                serde_json::json!({"answer":"allow", "host_add":{"destination":"user@one"}})
+                serde_json::json!({"answer":"allow", "host_add":{"destination":"user@one", "tailscale":false}})
             ),
             host_add_answer(
                 h.router(),
                 card.id.clone(),
-                serde_json::json!({"answer":"allow", "host_add":{"destination":"user@two"}})
+                serde_json::json!({"answer":"allow", "host_add":{"destination":"user@two", "tailscale":false}})
             )
         );
         assert!(
@@ -16670,7 +16714,11 @@ mod tests {
             .await;
         let accepted = match task.await.unwrap() {
             AgentOutcome::Ok {
-                reply: AgentReply::HostAddAccepted { destination },
+                reply:
+                    AgentReply::HostAddAccepted {
+                        destination,
+                        tailscale: false,
+                    },
             } => destination,
             other => panic!("expected accepted add, got {other:?}"),
         };
@@ -16681,6 +16729,108 @@ mod tests {
             assert_eq!(one, axum::http::StatusCode::GONE);
             assert_eq!(two, axum::http::StatusCode::NO_CONTENT);
             assert_eq!(accepted, "user@two");
+        }
+        assert_eq!(h.store.list_hosts().await.unwrap().len(), before);
+    }
+
+    /// Spec: with `--tailscale`, a destination Tailscale mode cannot use (an
+    /// `ssh://` URL, a port) is refused before any card, with the Add host
+    /// dialog's own Tailscale guidance, while a usable one raises a card that
+    /// carries the request. On that card, an answer pairing Tailscale with an
+    /// unusable destination is refused and leaves the card answerable; the
+    /// same destination without Tailscale is accepted, and the reply reports
+    /// the user's choice (here Tailscale switched off), not the request.
+    ///
+    /// Why: a card for a destination the dialog's probe must refuse would ask
+    /// the user to approve something guaranteed to fail. The helm checks the
+    /// user's edit too rather than trusting the client to have done so, and
+    /// the reply is the agent's only way to learn that the user unticked
+    /// Tailscale before adding the host.
+    #[farhelm_testtrace::test]
+    async fn host_add_tailscale_is_checked_before_the_card_and_answered_by_the_user() {
+        let (h, local, _) = host_fleet().await;
+        let before = h.store.list_hosts().await.unwrap().len();
+        let _gui = h.state.manager.ui_seat().hold();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        for destination in ["ssh://user@dev", "user@dev:2222"] {
+            let (kind, message) = refused(
+                handler
+                    .handle(
+                        origin,
+                        "local-live",
+                        AgentVerb::HostAdd {
+                            destination: destination.into(),
+                            alias: None,
+                            tailscale: true,
+                        },
+                    )
+                    .await,
+            );
+            assert_eq!(kind, ErrorKind::InvalidRequest, "{destination}");
+            assert!(message.contains("Tailscale mode needs"), "{message}");
+            assert!(
+                h.state.approvals.list().is_empty(),
+                "no card for {destination}"
+            );
+        }
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostAdd {
+                        destination: "user@dev".into(),
+                        alias: None,
+                        tailscale: true,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert_eq!(
+            card.action,
+            ApprovalAction::HostAdd {
+                destination: "user@dev".into(),
+                alias: None,
+                tailscale: true,
+            }
+        );
+        assert_eq!(
+            host_add_answer(
+                h.router(),
+                card.id.clone(),
+                serde_json::json!({"answer":"allow", "host_add":{"destination":"ssh://user@dev", "tailscale":true}}),
+            )
+            .await,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            h.state.approvals.list()[0].id,
+            card.id,
+            "the refused edit preserves the card"
+        );
+        assert_eq!(
+            host_add_answer(
+                h.router(),
+                card.id.clone(),
+                serde_json::json!({"answer":"allow", "host_add":{"destination":"ssh://user@dev", "tailscale":false}}),
+            )
+            .await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        match task.await.unwrap() {
+            AgentOutcome::Ok {
+                reply:
+                    AgentReply::HostAddAccepted {
+                        destination,
+                        tailscale,
+                    },
+            } => {
+                assert_eq!(destination, "ssh://user@dev");
+                assert!(!tailscale, "the reply reports the user's choice");
+            }
+            other => panic!("expected accepted add, got {other:?}"),
         }
         assert_eq!(h.store.list_hosts().await.unwrap().len(), before);
     }
@@ -16703,6 +16853,7 @@ mod tests {
                     AgentVerb::HostAdd {
                         destination: "user@new".into(),
                         alias: None,
+                        tailscale: false,
                     },
                 )
                 .await
@@ -16711,7 +16862,7 @@ mod tests {
         let answer = tokio::spawn(host_add_answer(
             h.router(),
             card.id,
-            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}}),
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited", "tailscale":false}}),
         ));
         tokio::time::timeout(std::time::Duration::from_secs(20), gate.reached.notified())
             .await
@@ -16853,6 +17004,7 @@ mod tests {
             AgentVerb::HostAdd {
                 destination: "user@new".into(),
                 alias: Some("new".into()),
+                tailscale: false,
             },
             AgentVerb::HostEdit {
                 host: "user@builder".to_string(),
@@ -16924,6 +17076,7 @@ mod tests {
             AgentVerb::HostAdd {
                 destination: "user@new".into(),
                 alias: None,
+                tailscale: false,
             },
             AgentVerb::HostEdit {
                 host: "user@builder".to_string(),
@@ -17967,6 +18120,7 @@ mod tests {
                 AgentVerb::HostAdd {
                     destination: "user@new-host".into(),
                     alias: None,
+                    tailscale: false,
                 },
             ),
             (

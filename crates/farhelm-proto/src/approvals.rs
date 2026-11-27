@@ -162,6 +162,10 @@ pub enum ApprovalAction {
     HostAdd {
         destination: String,
         alias: Option<String>,
+        /// The agent asked for the Tailscale host option. The card shows it
+        /// and the add dialog starts with it checked; the user's own choice
+        /// in the dialog is what [`HostAddAnswer::tailscale`] carries back.
+        tailscale: bool,
     },
     /// A browser request, shown as exact peer-controlled URL data. A preapproved request
     /// needed an Open click in the old web client; the desktop opens through the helm's native sink.
@@ -407,8 +411,9 @@ pub enum LaunchVerb {
 #[serde(deny_unknown_fields)]
 pub struct ApprovalAnswerRequest {
     pub answer: ApprovalAnswer,
-    /// Required only for HostAdd Allow: the destination actually approved in
-    /// the editable dialog. Alias stays with the ordinary add flow.
+    /// Required only for HostAdd Allow: the destination and Tailscale choice
+    /// actually approved in the editable dialog. Alias stays with the
+    /// ordinary add flow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_add: Option<HostAddAnswer>,
 }
@@ -419,6 +424,10 @@ pub struct ApprovalAnswerRequest {
 #[serde(deny_unknown_fields)]
 pub struct HostAddAnswer {
     pub destination: String,
+    /// Whether the dialog's Tailscale host option was checked when the user
+    /// clicked Add. It may differ from the card's request in either
+    /// direction; the agent's reply reports this value, not the request.
+    pub tailscale: bool,
 }
 
 /// Bound destination text before displaying it or carrying an edited answer.
@@ -724,6 +733,7 @@ mod tests {
         let add = super::ApprovalAction::HostAdd {
             destination: "user@new".into(),
             alias: Some("new".into()),
+            tailscale: true,
         };
         for (card, kind) in [
             (add, "host_add"),

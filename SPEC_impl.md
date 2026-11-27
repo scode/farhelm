@@ -7705,22 +7705,24 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `sets_resume_command` (in the table, `command (set)`), and names the host a template's install identity currently
   resolves to. Named templates show their effective `name_kind` explicitly in JSON, including `base` when the wire reply
   omits it; the table labels the quoted title as a base or fixed name. This additive discovery default does not change
-  the schema version. It does not change the normalized storage or write replies, which omit Base. Version 3 is the
-  restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its
-  spelling and meaning. Version 4 is the profile removal: a session's `agent` is always its agent type's word or
-  `custom`, never a profile name, and the profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained
-  `no_resume_command`, for a command launch with no resume command. `farhelm agent profiles` is still parsed, hidden,
-  only so it can be refused with a message saying profiles were removed and naming `farhelm agent templates`. A session
-  row's non-secret `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it
-  cannot (`not-captured`, `no-reporting`, `no-resume-command`; `not_captured`, `no_conversation_reporting` and
-  `no_resume_command` in JSON); it does not disclose the template, captured conversation locator, or a live-stop
-  recommendation. Every dynamic table cell is escaped to one printable line and non-final descriptive columns are capped
-  at 48 characters: these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row,
-  an ESC drives the terminal, and one long title would otherwise be padded onto every other row. Exact host, session and
-  template selector columns print whole; a session reference is bounded at 77 bytes before display escaping. A cut
-  listing prints its rows on stdout and one warning on stderr, so a script capturing stdout still gets nothing but the
-  table. It has no timeout of its own: the supervisor bounds the relay and is the only party that can distinguish its
-  two failures (see the transport section's version-20 paragraph).
+  the schema version. It does not change the normalized storage or write replies, which omit Base. Each host row's
+  `tailscale` flag (protocol 92) is additive too and also leaves the version at 8. The flag is in the JSON form only:
+  the table has no column for it, and `KIND` stays the host's kind. Version 3 is the restart-only-resumes change:
+  `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its spelling and meaning. Version 4 is
+  the profile removal: a session's `agent` is always its agent type's word or `custom`, never a profile name, and the
+  profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained `no_resume_command`, for a command launch
+  with no resume command. `farhelm agent profiles` is still parsed, hidden, only so it can be refused with a message
+  saying profiles were removed and naming `farhelm agent templates`. A session row's non-secret `OFFER` cell is `resume`
+  when restart can resume the session's conversation, otherwise the reason it cannot (`not-captured`, `no-reporting`,
+  `no-resume-command`; `not_captured`, `no_conversation_reporting` and `no_resume_command` in JSON); it does not
+  disclose the template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is
+  escaped to one printable line and non-final descriptive columns are capped at 48 characters: these values are
+  fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an ESC drives the terminal, and
+  one long title would otherwise be padded onto every other row. Exact host, session and template selector columns print
+  whole; a session reference is bounded at 77 bytes before display escaping. A cut listing prints its rows on stdout and
+  one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no timeout of its own:
+  the supervisor bounds the relay and is the only party that can distinguish its two failures (see the transport
+  section's version-20 paragraph).
 - `farhelm agent delete --session <id> [--stop-if-running]` — removes an explicitly named session, refusing self-delete.
   Success prints `deleted <id>` on stdout and any checkout notice on stderr. The relay and helm both refuse self-delete;
   the helm derives a delete guard from the target state shown on its approval card and passes it unchanged to the
@@ -9886,13 +9888,25 @@ settings switch and fleet-wide switch write independent stored values through th
 switch remains editable while the fleet-wide grant is on.
 
 Protocol 64 adds `AgentVerb::HostAdd` and `AgentReply::HostAddAccepted`, plus the distinct `host_add` approval tag,
-which requires direct Allow. Its answer carries only the edited destination; that payload is required on HostAdd Allow
-and refused on every other action or answer, with bounded nonempty text checked before the entry is taken. Alias stays
-in the dialog's ordinary add binding. The existing approval table's take elects the sole answering window. A HostAdd
-Allow carries a oneshot receipt with its destination: the answer POST returns 204 only after the waiting host-add
-handler selected that answer and passed its final origin check. A failed send, expiry, or dropped receipt returns Gone
-and permits no discovery probe. Sending the positive receipt is the last fallible approval step, with no intervening
-await or later origin veto. For other actions the waiter sends its receipt when it takes the answer.
+which requires direct Allow. Its answer carries only the edited destination (and, since protocol 92, the Tailscale
+choice); that payload is required on HostAdd Allow and refused on every other action or answer, with bounded nonempty
+text checked before the entry is taken. Alias stays in the dialog's ordinary add binding. The existing approval table's
+take elects the sole answering window. A HostAdd Allow carries a oneshot receipt with its destination: the answer POST
+returns 204 only after the waiting host-add handler selected that answer and passed its final origin check. A failed
+send, expiry, or dropped receipt returns Gone and permits no discovery probe. Sending the positive receipt is the last
+fallible approval step, with no intervening await or later origin veto. For other actions the waiter sends its receipt
+when it takes the answer.
+
+Protocol 92 adds `tailscale` to `AgentVerb::HostAdd`, the `host_add` card, `HostAddAnswer` and `HostAddAccepted`; an
+older helm would have dropped the request and added an ordinary SSH host. The helm runs the Tailscale destination parser
+(`ssh::tailscale::destination_host`) twice: in `ParsedAgentVerb::parse`, so a request it would refuse never shows a
+card, and on an Allow whose answer pairs `tailscale` with an edited destination, before the entry is taken, so the helm
+does not take the client's word for the edit and never reports to the agent as accepted a pair the probe must refuse.
+The supervisor only relays the bit, because its crate does not depend on the helm, where the parser lives. The request
+only seeds the card and the dialog's checkbox; the dialog reads the checkbox once with the fields when Add is pressed
+and both the answer and the probe use that value, so the reply reports what the approved add's first probe uses. An Add
+from a dialog reopened after a refused setup is an ordinary add the agent is not told about, as it already was for the
+destination. No completion flow was added: the reply attests to the approved choice, not to discovery or installation.
 
 An agent's host add is answered through the ordinary Add host dialog (`hosts::add::open_for_agent`), with the request's
 state in the approvals module (`approvals::host_add`); nothing else keeps a pending registry or an installer of its own.

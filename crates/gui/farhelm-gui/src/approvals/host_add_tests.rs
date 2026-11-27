@@ -63,6 +63,7 @@ fn request() -> PendingApproval {
         action: ApprovalAction::HostAdd {
             destination: "ops@new.example".to_owned(),
             alias: Some("newbox".to_owned()),
+            tailscale: false,
         },
         own_host_session_action: false,
         expires_at_ms: 1,
@@ -281,6 +282,25 @@ fn painted_in(cx: &mut VisualTestContext, id: &str) -> String {
         .join(" ")
 }
 
+/// [`request`], with the agent asking for the Tailscale host option.
+fn tailscale_request() -> PendingApproval {
+    let mut approval = request();
+    approval.action = ApprovalAction::HostAdd {
+        destination: "ops@new.example".to_owned(),
+        alias: Some("newbox".to_owned()),
+        tailscale: true,
+    };
+    approval
+}
+
+/// The Tailscale host checkbox's toggled state as last drawn, or `None` when it was not drawn.
+fn tailscale_box(cx: &mut VisualTestContext) -> Option<gpui::Toggled> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("add-host-tailscale"))
+        .and_then(|node| node.toggled)
+}
+
 /// A provisionable probe reply with a one-step plan.
 fn plan_reply() -> Value {
     json!({
@@ -300,8 +320,9 @@ fn plan_reply() -> Value {
 
 /// SPEC.md: the card's action opens the ordinary add host dialog with the requested destination and alias, and
 /// opening is not approval. Specified: the dialog opens with focus in the destination field, both fields prefilled,
-/// who asked and what Add approves painted above them, no host kind choice (the agent asked for an SSH destination,
-/// so the dialog must not answer with a sandbox), and nothing sent to the helm.
+/// the Tailscale host checkbox unchecked for a request that did not ask for it, who asked and what Add approves
+/// (Tailscale host: No included) painted above them, no host kind choice (the agent asked for an SSH destination, so
+/// the dialog must not answer with a sandbox), and nothing sent to the helm.
 #[gpui::test]
 fn the_cards_action_opens_the_dialog_prefilled_and_answers_nothing(cx: &mut TestAppContext) {
     let mut f = fixture(cx, Vec::new());
@@ -331,12 +352,14 @@ fn the_cards_action_opens_the_dialog_prefilled_and_answers_nothing(cx: &mut Test
         "ops@new.example",
         "Alias to add",
         "newbox",
+        "Tailscale host No",
     ] {
         assert!(
             approved.contains(expected),
             "{expected:?} painted in {approved}"
         );
     }
+    assert_eq!(tailscale_box(f.cx), Some(gpui::Toggled::False));
     assert!(
         frame(f.cx)
             .iter()
@@ -355,6 +378,7 @@ fn what_add_approves_is_shown_escaped(cx: &mut TestAppContext) {
     approval.action = ApprovalAction::HostAdd {
         destination: "ops@ev\u{202e}il".to_owned(),
         alias: None,
+        tailscale: false,
     };
     let mut f = fixture_with(cx, approval, Vec::new());
     f.open().expect("opened");
@@ -514,7 +538,7 @@ fn add_answers_allow_with_the_edited_destination_then_probes(cx: &mut TestAppCon
     let (id, body) = f.one_answer();
     assert_eq!(
         body,
-        json!({ "answer": "allow", "host_add": { "destination": "ops@new.example2" } })
+        json!({ "answer": "allow", "host_add": { "destination": "ops@new.example2", "tailscale": false } })
     );
     assert!(
         f.helm.commands().is_empty(),
@@ -539,6 +563,97 @@ fn add_answers_allow_with_the_edited_destination_then_probes(cx: &mut TestAppCon
         })
     );
     assert!(any_open(f.cx), "the dialog stays for the probe's outcome");
+}
+
+/// An agent's Tailscale request is a starting point the user can overrule, and the agent is told what the user chose.
+/// Specified: a request asking for Tailscale opens the dialog with the Tailscale host checkbox checked and the approved
+/// lines saying "Tailscale host Yes"; unchecking it turns that line to "No" at once; Add then answers Allow with
+/// `tailscale: false`, and once the helm accepts it the probe asks for an ordinary SSH host, not a Tailscale one.
+/// Why: the reply the agent reads reports this answer, and the probe must use the same choice the Allow approved, or
+/// the user would approve one kind of host and get the other.
+#[gpui::test]
+fn a_tailscale_request_prechecks_the_box_and_add_answers_the_users_choice(cx: &mut TestAppContext) {
+    let mut f = fixture_with(cx, tailscale_request(), Vec::new());
+    f.open().expect("opened");
+    assert_eq!(
+        tailscale_box(f.cx),
+        Some(gpui::Toggled::True),
+        "the request pre-checks the box"
+    );
+    let approved = painted_in(f.cx, "add-host-agent-approved");
+    assert!(approved.contains("Tailscale host Yes"), "{approved}");
+    click(f.cx, "add-host-tailscale");
+    settle(f.cx);
+    assert_eq!(
+        tailscale_box(f.cx),
+        Some(gpui::Toggled::False),
+        "premise: the user unchecked it"
+    );
+    let approved = painted_in(f.cx, "add-host-agent-approved");
+    assert!(
+        approved.contains("Tailscale host No"),
+        "the approved lines follow the toggle: {approved}"
+    );
+    assert!(f.helm.commands().is_empty(), "toggling sent nothing");
+    click(f.cx, "add-host-submit");
+    let (id, body) = f.one_answer();
+    assert_eq!(
+        body,
+        json!({ "answer": "allow", "host_add": { "destination": "ops@new.example", "tailscale": false } })
+    );
+    f.request_ends();
+    f.helm.reply(id, 204, None);
+    settle(f.cx);
+    let (_, probe) = one_command(&mut f.helm, Method::Post, "/api/hosts/probe");
+    assert_eq!(
+        probe["target"],
+        json!({ "kind": "ssh", "destination": "ops@new.example" }),
+        "the probe uses the answered choice"
+    );
+}
+
+/// A kept Tailscale request goes through to the probe, and the reopened dialog after a refused setup still shows and
+/// follows the choice: the approved lines are what the user reads before Add, there as much as on first opening.
+/// Specified: Add with the box left checked answers Allow with `tailscale: true` and probes a Tailscale host; a 409 to
+/// the confirmed setup reopens Add host with the box still checked and "Tailscale host Yes" in the approved lines, and
+/// unchecking it there turns the line to "No".
+#[gpui::test]
+fn a_kept_tailscale_request_probes_tailscale_and_survives_a_refused_setup(cx: &mut TestAppContext) {
+    let mut f = fixture_with(cx, tailscale_request(), Vec::new());
+    f.open().expect("opened");
+    click(f.cx, "add-host-submit");
+    let (id, body) = f.one_answer();
+    assert_eq!(
+        body,
+        json!({ "answer": "allow", "host_add": { "destination": "ops@new.example", "tailscale": true } })
+    );
+    f.request_ends();
+    f.helm.reply(id, 204, None);
+    settle(f.cx);
+    let (probe, sent) = one_command(&mut f.helm, Method::Post, "/api/hosts/probe");
+    assert_eq!(sent["target"]["tailscale"], json!(true));
+    f.helm.reply(probe, 200, Some(plan_reply()));
+    settle(f.cx);
+    click(f.cx, "prompt-confirm");
+    let (provision, _) = one_command(&mut f.helm, Method::Post, "/api/hosts/provision");
+    f.helm
+        .reply(provision, 409, Some(json!("the plan was already used")));
+    settle(f.cx);
+    assert_eq!(
+        destination(f.cx),
+        "ops@new.example",
+        "premise: Add host reopened with the destination"
+    );
+    assert_eq!(tailscale_box(f.cx), Some(gpui::Toggled::True));
+    let approved = painted_in(f.cx, "add-host-agent-approved");
+    assert!(approved.contains("Tailscale host Yes"), "{approved}");
+    click(f.cx, "add-host-tailscale");
+    settle(f.cx);
+    let approved = painted_in(f.cx, "add-host-agent-approved");
+    assert!(
+        approved.contains("Tailscale host No"),
+        "the reopened lines follow the toggle: {approved}"
+    );
 }
 
 /// SPEC.md: a late or refused answer starts nothing, no discovery probe included, and a refused form stays editable.
