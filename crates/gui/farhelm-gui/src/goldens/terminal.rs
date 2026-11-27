@@ -477,8 +477,16 @@ pub(super) fn terminal_cut_row(
     let Some(set) = cut_row_terminal(state) else {
         return ground.into_any_element();
     };
+    // The strip grows along its parent's main axis to keep New terminal at its right end, so it sits in a row of its
+    // own, as it does in the session header, rather than straight in the column, where it would grow downward.
     ground
-        .child(TerminalSet::strip(&set, window, cx))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_none()
+                .child(TerminalSet::strip(&set, window, cx)),
+        )
         .child(div().flex_1().min_h_0().child(set))
         .into_any_element()
 }

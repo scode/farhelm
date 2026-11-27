@@ -2531,6 +2531,15 @@ manager, Farhelm relies on systemd scopes to end a session's and a tab's process
 ignore SIGHUP when their terminal host is killed, Farhelm applies cheap sanity checks only and adds no significant
 complexity, such as a durable record that would carry a tab close's retry across a supervisor restart.
 
+Each shell tab's close button sits at its left, in a slot that otherwise shows a terminal mark, so none sits beside New
+terminal. It shows while the pointer is over the tab, keyboard focus is on the tab or the button, the tab's close
+confirmation is open, or its close is in flight, and nothing in the strip moves when it does. Tab reaches it right after
+its tab even while it is not shown. The main terminal's tab has neither mark nor close button. New terminal stays at the
+right end of the tab strip however many tabs are open, so adding a tab never moves it and a second press at the same
+spot opens another tab rather than reaching the new tab's close button; only the tabs before it scroll. A strip too
+narrow to show New terminal and a control's width of its tabs (a 650px pane beside a tunnel pill, say) puts New terminal
+after the last tab instead, scrolling with them, so that the tabs stay reachable.
+
 Closing the active shell tab, including when its shell exits or another client closes it, selects the nearest surviving
 tab to its left in opening order. The main terminal takes over when there is no earlier tab. Closing a tab that is
 already in the background leaves the active terminal in place. The fallback takes focus if the closed terminal held it.
@@ -3653,9 +3662,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   action, including its existing confirmation; the caret opens a menu offering that action and Restart with… or Replace
   with…. The ordinary buttons are 26 pixels high. The row uses condensed controls when it runs short of width. Text
   size, Stop, both parts of each split button, Clone, Delete and the tunnel pill remain fully visible and keyboard
-  reachable from a 650px main pane; only the tab strip takes the remaining width and scrolls horizontally when needed.
-  Narrower panes may clip the row, which never wraps. The bottom bar is about one tab-strip row high and shows, in
-  order, status, session name, host, age, the managed-checkout branch mark when present, directory, and command line.
+  reachable from a 650px main pane; only the tab strip takes the remaining width, and its tabs scroll horizontally when
+  needed. Narrower panes may clip the row, which never wraps. The bottom bar is about one tab-strip row high and shows,
+  in order, status, session name, host, age, the managed-checkout branch mark when present, directory, and command line.
   The host's icon follows the session list's rules; its name is the full display name, prominent beside the session
   name. A missing host name omits the host rather than inventing one. Directory display still abbreviates the home
   directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The terminal loses no height in the

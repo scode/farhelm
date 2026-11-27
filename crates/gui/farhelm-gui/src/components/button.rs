@@ -162,11 +162,15 @@ pub enum Tier {
     /// The shown terminal's tab is drawn through [`Button::pressed`], the accent fill with the inverse ink
     /// (`.tab.selected`); [`Button::fill`] has its one exception under the keyboard ring.
     TerminalTab,
-    /// `.tab-close`: the × beside a shell tab in the session view's tab strip, a ghost in a tight box (`padding: 3px 7px`
-    /// at 12 pixels) that never shrinks, in the quiet `--fg-1` ink that turns `--danger` on the subdued red fill
-    /// (`--danger-bg-dim`) under the pointer, warning before a press that ends a shell. Busy
-    /// ([`Button::busy`]) while its tab closes.
-    TerminalTabClose,
+    /// A shell tab's close button, drawn over the leading slot at the left of its tab in the session view's tab strip
+    /// (`terminal::set`, which says why it sits there and not beside New terminal): a ghost square of
+    /// [`TERMINAL_TAB_CLOSE_SIDE`] around the 14-pixel × that never shrinks. Under the pointer it warns before a press
+    /// that ends a shell. On an ordinary tab (`on_fill: false`) it keeps the old `.tab-close` look: the quiet `--fg-1`
+    /// ink that turns `--danger` on the subdued red fill (`--danger-bg-dim`). On the shown tab's solid accent fill
+    /// (`on_fill: true`) neither of those reads, so it draws in the inverse ink with the solid danger fill under the
+    /// pointer (the white-on-red of [`Tier::Danger`]) and the inverse focus ring, as [`Tier::RowMenu`] does on a
+    /// selected row. Busy ([`Button::busy`]) while its tab closes, drawn at half opacity then and while disabled.
+    TerminalTabClose { on_fill: bool },
     /// `.host-color-choice`: one of the host settings' color choices, a 26-pixel circle with 3 pixels around its
     /// content (the color's swatch), no fill or edge at rest and no hover fill. Chosen, it takes the accent fill inside
     /// an edge in the inverse ink.
@@ -189,8 +193,12 @@ const QUICK_MARK_PAD: (f32, f32) = (10., 5.);
 const TUNNEL_PAD: (f32, f32) = (2., 4.);
 /// The [`Tier::TerminalTab`] box's padding, vertical then horizontal (`.tab`: `3px 10px`).
 const TERMINAL_TAB_PAD: (f32, f32) = (3., 10.);
-/// The [`Tier::TerminalTabClose`] box's padding, vertical then horizontal (`.tab-close`: `3px 7px`).
-const TERMINAL_TAB_CLOSE_PAD: (f32, f32) = (3., 7.);
+/// How far a [`Tier::TerminalTab`] button's content starts from its left edge: its side padding and its edge. A shell
+/// tab's owner lines its close button up with the leading slot there.
+pub(crate) const TERMINAL_TAB_INSET: f32 = TERMINAL_TAB_PAD.1 + EDGE;
+/// The [`Tier::TerminalTabClose`] square's side, its edge included: the 14-pixel × with 2 pixels around it inside the
+/// edge, 5 pixels shorter than the 25-pixel tab it sits on, so the tab's fill shows around it.
+pub(crate) const TERMINAL_TAB_CLOSE_SIDE: f32 = 20.;
 /// The [`Tier::NumberKey`] box's padding on every side.
 const NUMBER_KEY_PAD: f32 = 4.;
 /// Leaves 18 pixels for the widest label at 10 pixels of text, including the Mac command glyph and a digit.
@@ -239,7 +247,7 @@ const TOOLBAR_PAD: (f32, f32) = (3., 10.);
 pub(crate) const TOOLBAR_TEXT: Pixels = px(12.5);
 const TOOLBAR_LINE: f32 = 18.;
 const TOOLBAR_ICON: Pixels = px(14.);
-const TOOLBAR_ICON_GAP: Pixels = px(6.);
+pub(crate) const TOOLBAR_ICON_GAP: Pixels = px(6.);
 /// Gap between adjacent toolbar controls. The parts of a joined control use `BUTTON_JOIN_GAP` inside it.
 pub(crate) const TOOLBAR_ACTION_GAP: Pixels = px(8.);
 
@@ -785,7 +793,12 @@ impl Button {
             | Tier::RowMenu { on_fill: false }
             | Tier::FieldRemove
             | Tier::TerminalTab => (None, palette.control_hover, None, palette.fg_1),
-            Tier::TerminalTabClose => (None, palette.danger_bg_dim, None, palette.fg_1),
+            Tier::TerminalTabClose { on_fill: false } => {
+                (None, palette.danger_bg_dim, None, palette.fg_1)
+            }
+            Tier::TerminalTabClose { on_fill: true } => {
+                (None, palette.danger_bg, None, palette.on_fill)
+            }
             // Returned above, before the pressed looks.
             Tier::QuickMark { .. } | Tier::NumberKey { .. } => {
                 (None, palette.control_hover, None, palette.fg_2)
@@ -939,6 +952,26 @@ impl Button {
             _ => Some(hover),
         }
     }
+
+    /// The ink the button draws its words and icon in, for content its owner draws in place of the label
+    /// ([`Button::content`]) that must match it: a shell tab's leading terminal mark is an icon in that content, and an
+    /// SVG takes no ink from its parent, so its owner reads the ink here rather than repeating the tier's choice.
+    pub(crate) fn ink(&self, palette: &Palette) -> Token {
+        self.colors(palette).3
+    }
+
+    /// The ink an active button turns under the pointer, where its tier changes it: a field's ✕
+    /// (`.templates-remove:hover { color: var(--danger) }`, drawn as text) and an ordinary tab's × (`.tab-close:hover`,
+    /// drawn as an icon) turn red, as a warning before a press that removes something. The render applies it to words
+    /// and to an icon alike. The shown tab's × keeps its inverse ink, which the solid danger
+    /// fill under it already sets apart, since the danger red would not read on that fill.
+    pub(super) fn hover_ink(&self, palette: &Palette) -> Option<Token> {
+        matches!(
+            self.tier,
+            Tier::FieldRemove | Tier::TerminalTabClose { on_fill: false }
+        )
+        .then_some(palette.danger)
+    }
 }
 
 impl RenderOnce for Button {
@@ -990,9 +1023,12 @@ impl RenderOnce for Button {
             {
                 (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
             }
-            Tier::Rail | Tier::Link | Tier::Readout | Tier::IconChoice | Tier::FieldRemove => {
-                (px(0.), px(0.))
-            }
+            Tier::Rail
+            | Tier::Link
+            | Tier::Readout
+            | Tier::IconChoice
+            | Tier::FieldRemove
+            | Tier::TerminalTabClose { .. } => (px(0.), px(0.)),
             Tier::UpdateReady { .. } => (px(2.), px(7.)),
             Tier::ColorChoice => (px(COLOR_CHOICE_PAD), px(COLOR_CHOICE_PAD)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
@@ -1001,7 +1037,6 @@ impl RenderOnce for Button {
             Tier::NumberKey { .. } => (px(NUMBER_KEY_PAD), px(NUMBER_KEY_PAD)),
             Tier::Tunnel => (px(TUNNEL_PAD.0), px(TUNNEL_PAD.1)),
             Tier::TerminalTab => (px(TERMINAL_TAB_PAD.0), px(TERMINAL_TAB_PAD.1)),
-            Tier::TerminalTabClose => (px(TERMINAL_TAB_CLOSE_PAD.0), px(TERMINAL_TAB_CLOSE_PAD.1)),
             Tier::TemplateRow => (px(TEMPLATE_ROW_PAD.0), px(TEMPLATE_ROW_PAD.1)),
             Tier::HostUpdate { .. } => (px(HOST_UPDATE_PAD.0), px(HOST_UPDATE_PAD.1)),
             Tier::Waiting => (px(WAITING_PAD.0), px(WAITING_PAD.1)),
@@ -1025,7 +1060,9 @@ impl RenderOnce for Button {
             // The quiet look's fill is light in the light palette, where the inverse ring would not show.
             _ if pressed && self.quiet => palette.accent,
             _ if pressed => palette.on_fill,
-            Tier::OnBanner | Tier::RowMenu { on_fill: true } => palette.on_fill,
+            Tier::OnBanner
+            | Tier::RowMenu { on_fill: true }
+            | Tier::TerminalTabClose { on_fill: true } => palette.on_fill,
             Tier::Ghost
             | Tier::Neutral
             | Tier::Primary
@@ -1048,7 +1085,7 @@ impl RenderOnce for Button {
             | Tier::ColorChoice
             | Tier::Tunnel
             | Tier::TerminalTab
-            | Tier::TerminalTabClose
+            | Tier::TerminalTabClose { on_fill: false }
             | Tier::HostUpdate { .. }
             | Tier::Waiting
             | Tier::RowMenu { on_fill: false } => palette.accent,
@@ -1064,6 +1101,7 @@ impl RenderOnce for Button {
             Tier::QuickMark { .. } => (pad_x, None),
             Tier::IconChoice => (pad_x, Some(px(ICON_CHOICE_SIZE))),
             Tier::ColorChoice => (pad_x, Some(px(COLOR_CHOICE_SIZE))),
+            Tier::TerminalTabClose { .. } => (pad_x, Some(px(TERMINAL_TAB_CLOSE_SIDE))),
             _ if self.show_label || self.content.is_some() => (pad_x, None),
             // A split button's caret keeps its own side padding, and takes its height from the main part beside it.
             _ if matches!(self.split, Some(SplitPart::Caret { .. })) => (pad_x, None),
@@ -1074,11 +1112,14 @@ impl RenderOnce for Button {
         let rail_row = self.rail_row && self.tier == Tier::Rail;
         let square = self.side.is_some()
             || (self.tier == Tier::Rail && !rail_row)
-            || matches!(self.tier, Tier::IconChoice | Tier::ColorChoice);
+            || matches!(
+                self.tier,
+                Tier::IconChoice | Tier::ColorChoice | Tier::TerminalTabClose { .. }
+            );
         // `.btn.host-update-button`'s `flex: 0 0 auto`: the row's name gives way first.
         let rigid = matches!(
             self.tier,
-            Tier::HostUpdate { .. } | Tier::TerminalTab | Tier::TerminalTabClose
+            Tier::HostUpdate { .. } | Tier::TerminalTab | Tier::TerminalTabClose { .. }
         );
         let enabled = !self.disabled;
         // A busy button stays focusable (`enabled`), but nothing it does acts then (`active`).
@@ -1181,7 +1222,7 @@ impl RenderOnce for Button {
             .border_color(theme::color(edge.unwrap_or(theme::TRANSPARENT)))
             // `.tab-close:disabled { opacity: 0.5 }`: a × whose tab is closing, or that cannot be pressed, reads so.
             .when(
-                self.tier == Tier::TerminalTabClose && (self.busy || self.disabled),
+                matches!(self.tier, Tier::TerminalTabClose { .. }) && (self.busy || self.disabled),
                 |button| button.opacity(0.5),
             )
             // `.session-tunnel-toggle`: `gap: 3px`, `font-size: 11px`, `line-height: 1.4`, `border-radius: 8px`.
@@ -1266,11 +1307,17 @@ impl RenderOnce for Button {
                 },
             ));
         }
+        // The hover ink reaches words through the box's own hover style, since text takes its ink from its parent,
+        // but an icon is an SVG, which takes none: it gets the same ink from a group hover on the box (an ordinary
+        // tab's ×). Color only, so the group hover changes no layout (`copy_field`'s rule).
+        let hover_ink = self.hover_ink(palette).filter(|_| active);
+        let icon_group: Option<SharedString> = hover_ink
+            .filter(|_| self.icon.is_some() && self.spinner_step.is_none())
+            .map(|_| format!("{}-hover-ink", self.id).into());
+        if let Some(group) = &icon_group {
+            button = button.group(group.clone());
+        }
         if active {
-            // The field's ✕ also turns red under the pointer (`.templates-remove:hover { color: var(--danger) }`).
-            // A tab's × does too (`.tab-close:hover`).
-            let hover_ink = matches!(self.tier, Tier::FieldRemove | Tier::TerminalTabClose)
-                .then_some(palette.danger);
             let hover_fill = self.fill(palette, true, focused);
             button = button.cursor_pointer().hover(move |style| {
                 let style = match hover_fill {
@@ -1328,6 +1375,9 @@ impl RenderOnce for Button {
                     .path(icon.path())
                     .size(icon_size)
                     .text_color(theme::color(text))
+                    .when_some(icon_group.zip(hover_ink), |glyph, (group, ink)| {
+                        glyph.group_hover(group, move |style| style.text_color(theme::color(ink)))
+                    })
                     .into_any_element()
             })
         };

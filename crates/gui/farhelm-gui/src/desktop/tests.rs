@@ -1181,16 +1181,21 @@ mod mac {
     /// interaction, while the strip's empty part around the tabs is background. A stale session's tabs are inert
     /// beneath the unavailable card, and an inert tab must not turn into background because it no longer answers: the
     /// old `click-detail.test.js`'s "press over an inert descendant" (at reference commit `24bc0580`), which pressed
-    /// exactly that. Specified: with session a open listing two shell tabs, a press on Terminal 2 decides no drag and
-    /// chooses that tab; a press in the gap between the Agent tab and Terminal 1, and one above Terminal 1 inside the
-    /// row, drag; once a is listed stale (the card drawn, the tab no longer a focus stop: the premise), a press on
-    /// Terminal 2 still decides no drag.
+    /// exactly that. A shell tab's × is drawn over the start of its tab, not beside it, so the gaps between shell tabs
+    /// are empty background too, and a press on the × is the ×'s alone: it stops the press before the row sees it, so
+    /// the row decides nothing, the tab under it is not chosen, and the × asks its question. Specified: with session a
+    /// open listing two shell tabs, a press on Terminal 2 decides no drag and chooses that tab; a press in the gap
+    /// between the Agent tab and Terminal 1, one in the gap between Terminal 1 and Terminal 2, one in the open strip
+    /// between Terminal 2 and New terminal (pinned at the strip's right end, so that space only exists since then), and
+    /// one above Terminal 1 inside the row, drag; a press on Terminal 1's × decides nothing, leaves Terminal 1 unchosen
+    /// and opens its close question; once a is listed stale (the card drawn, the tab no longer a focus stop: the
+    /// premise), a press on Terminal 2 still decides no drag.
     #[gpui::test]
     fn the_top_rows_tabs_keep_their_presses_live_or_inert_and_the_strip_around_them_drags(
         cx: &mut TestAppContext,
     ) {
         use crate::session_list::menu_tests::{push, snapshot};
-        use crate::terminal::set::{AGENT_TAB_ID, tab_element_id};
+        use crate::terminal::set::{ADD_ID, AGENT_TAB_ID, close_element_id, tab_element_id};
         let mut main = test_support::open_main(cx, snapshot(&[(session("a"), 2)], false));
         test_support::settle(main.cx);
         let (first, second) = (tab_element_id("tab-0"), tab_element_id("tab-1"));
@@ -1221,6 +1226,39 @@ mod mac {
         assert!(row.top() + px(4.) < tab.top(), "the premise: room above");
         let above = gpui::point(tab.center().x, tab.top() - px(2.));
         assert_eq!(press_at(main.cx, above), drag, "above a tab");
+        let next = drawn(main.cx, &second);
+        let gap = px((f32::from(tab.right()) + f32::from(next.left())) / 2.);
+        let between = gpui::point(gap, tab.center().y);
+        assert_eq!(press_at(main.cx, between), drag, "between two shell tabs");
+        // New terminal is pinned at the strip's right end, so a wide row leaves open strip between the last tab and it.
+        let add = drawn(main.cx, ADD_ID);
+        assert!(
+            next.right() + px(24.) < add.left(),
+            "the premise: New terminal sits well clear of the last tab"
+        );
+        let open = gpui::point(
+            px((f32::from(next.right()) + f32::from(add.left())) / 2.),
+            next.center().y,
+        );
+        assert_eq!(
+            press_at(main.cx, open),
+            drag,
+            "between the last tab and New terminal"
+        );
+        let at = drawn(main.cx, &close_element_id("tab-0")).center();
+        assert_eq!(press_at(main.cx, at), None, "a shell tab's ×");
+        assert_ne!(
+            node(main.cx, &first).toggled,
+            chosen,
+            "the × did not choose its tab"
+        );
+        // Confirmations are on in this fixture, so the open question is what shows the × took the press. Closed
+        // again so that no question sits over the rest of the test.
+        assert!(
+            test_support::drawn(main.cx, "prompt"),
+            "the × took the press and asked"
+        );
+        test_support::keys(main.cx, "escape");
 
         push(
             &mut main.helm,

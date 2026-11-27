@@ -419,6 +419,50 @@ fn the_shown_terminal_tab_keeps_its_resting_accent_under_keyboard_focus() {
     }
 }
 
+/// Why: a shell tab's × now sits inside its tab, so on the shown tab it sits on the solid accent fill, where the
+/// ordinary close's quiet ink and subdued red hover would barely read and its red hover ink would vanish. The close
+/// must stay legible and look dangerous under the pointer on either tab, and keep the ring a keyboard user can see.
+///
+/// Spec, in both palettes: an ordinary tab's × draws the quiet ink with no resting fill, the subdued red fill under
+/// the pointer and the danger ink there; the shown tab's × draws the inverse ink with no resting fill, the solid danger
+/// fill under the pointer with its ink unchanged; the two hover fills differ, and neither resting state has an edge.
+/// This checks the tier's choice, not the drawn icon: the test frame records no colors, so that the render hands the
+/// hover ink to the × (an SVG, through a group hover) is checked by reading it, not here.
+#[test]
+fn a_tab_close_reads_on_an_ordinary_tab_and_on_the_shown_tabs_accent() {
+    let close = |on_fill: bool| {
+        // Its colors are the tier's, so a plain button in it stands for the strip's icon button.
+        Button::new(
+            "c",
+            "Close Terminal 1",
+            HoverHelp::tooltip("A close"),
+            Role::Button,
+        )
+        .icon(Icon::Close)
+        .tier(Tier::TerminalTabClose { on_fill })
+    };
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        let ordinary = close(false);
+        assert_eq!(
+            ordinary.colors(palette),
+            (None, palette.danger_bg_dim, None, palette.fg_1),
+            "an ordinary tab's ×"
+        );
+        assert_eq!(ordinary.hover_ink(palette), Some(palette.danger));
+        let shown = close(true);
+        assert_eq!(
+            shown.colors(palette),
+            (None, palette.danger_bg, None, palette.on_fill),
+            "the shown tab's ×"
+        );
+        assert_eq!(shown.hover_ink(palette), None, "its inverse ink stays");
+        assert_ne!(
+            palette.danger_bg, palette.accent_fill,
+            "the premise: red reads on the accent"
+        );
+    }
+}
+
 /// Why: the resting fill under the ring belongs to the tiers `Button::fill` lists. The host rail's chosen entry keeps
 /// the pressed look's hover accent under the keyboard ring, as `Button::pressed` documents (a deliberate departure from
 /// the old sheet, whose later `.btn` focus fill put white ink on a light fill there).

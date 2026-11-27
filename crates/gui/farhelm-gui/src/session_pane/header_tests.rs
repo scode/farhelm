@@ -2813,15 +2813,20 @@ fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
 }
 
 /// The old app condensed its actions only for measured pressure: "a wide row keeps its ordinary spacing even with
-/// tunnels" (the old stylesheet's comment on `.actions-compact`). The same row is where the tab strip's floor beside a
-/// pill shows on its own: the strip's tabs ask for less than 112 pixels, so only the floor (the old `min-width:
-/// 112px`) makes it wider, and a floor that went missing or gave way with room to spare would show here. Specified: in
-/// a 1400-pixel pane, once a remote session's terminal lists one tunnel to a very long host name, the pill is drawn and
-/// Stop, Restart and the gap between them have the same widths as before the pill showed, and the tab strip is at
-/// least 112 pixels wide and ends left of the pill.
+/// tunnels" (the old stylesheet's comment on `.actions-compact`). The strip takes the left region's free width, so its
+/// New terminal stays at the tab area's right end, just left of the pill (SPEC.md, "Session view"), where adding a tab
+/// never moves it. Specified: in a 1400-pixel pane, once a remote session's terminal lists one tunnel to a very long
+/// host name, the pill is drawn and Stop, Restart and the gap between them have the same widths as before the pill
+/// showed; the tab strip is at least 112 pixels wide and ends left of the pill; and New terminal ends where the strip
+/// ends, both before and after the pill showed.
 #[test]
 fn a_wide_pane_keeps_the_ordinary_actions_beside_a_pill() {
-    use crate::terminal::set::{STRIP_FLOOR_BESIDE_PILL, STRIP_ID};
+    use crate::terminal::set::{ADD_ID, STRIP_FLOOR_BESIDE_PILL, STRIP_ID};
+    let ends_the_strip = |nodes: &[gpui::DriverNode]| {
+        let strip = only_node(nodes, STRIP_ID).bounds;
+        let add = only_node(nodes, ADD_ID).bounds;
+        (strip.right() - add.right()).abs() < px(1.)
+    };
     let mut pane = RealPane::open(1400., remote_session());
     let before = pane.draw();
     let gap = |nodes: &[gpui::DriverNode]| {
@@ -2834,10 +2839,9 @@ fn a_wide_pane_keeps_the_ordinary_actions_beside_a_pill() {
         )
     };
     let ordinary = gap(&before);
-    let bare = only_node(&before, STRIP_ID).bounds;
     assert!(
-        bare.size.width < px(STRIP_FLOOR_BESIDE_PILL),
-        "the premise: without a pill the strip is narrower than its floor beside one: {bare:?}"
+        ends_the_strip(&before),
+        "New terminal ends the strip without a pill"
     );
     pane.open_tunnel(&long_host());
     let nodes = pane.draw();
@@ -2852,6 +2856,117 @@ fn a_wide_pane_keeps_the_ordinary_actions_beside_a_pill() {
         strip.size.width >= px(STRIP_FLOOR_BESIDE_PILL)
             && strip.origin.x + strip.size.width <= pill.origin.x,
         "the strip keeps its floor beside the pill: strip {strip:?}, pill {pill:?}"
+    );
+    assert!(
+        ends_the_strip(&nodes),
+        "New terminal ends the strip beside the pill"
+    );
+}
+
+/// The strip grows to keep New terminal at the tab area's right end, but a short row still takes width from the strip
+/// and the pill in proportion to their content, as the old app's `.tab-strip { flex: 0 1 auto; min-width: 112px }`
+/// did, and the 112-pixel floor keeps a strip with little content from shrinking below it while the pill has width to
+/// give. A strip that grew with no basis of its own (`flex_1`) would leave the pill its whole content width until the
+/// strip was down to its floor; a floor that went missing would let a short strip shrink below 112 pixels beside a pill
+/// still wider than its own 154-pixel floor. Specified: with one tunnel to a very long host name, narrowing the pane
+/// from 1399 pixels in 10-pixel steps down to 709: for a container environment's session with no shell tabs (a strip
+/// whose content is narrower than its floor), at every width where the pill is wider than 154 pixels the strip is at
+/// least 112 pixels wide, and at some such width exactly 112; and for the same session with two shell tabs, at the
+/// first width where the pill is narrower than it was at the start, the strip is wider than 112 pixels.
+#[test]
+fn a_short_row_shares_its_width_with_the_strip_down_to_its_floor() {
+    use crate::terminal::set::{STRIP_FLOOR_BESIDE_PILL, STRIP_ID};
+    let floor = px(STRIP_FLOOR_BESIDE_PILL);
+    // Each width of the sweep with the strip's and the pill's widths there, after the pill's widest.
+    let sweep = |snapshot: Vec<CollectionState>| {
+        let mut pane = RealPane::open(1400., snapshot);
+        pane.draw();
+        pane.open_tunnel(&long_host());
+        let widest = only_node(&pane.draw(), "session-tunnel-pill")
+            .bounds
+            .size
+            .width;
+        let widths: Vec<(u32, gpui::Pixels, gpui::Pixels)> = (709..1400)
+            .rev()
+            .step_by(10)
+            .map(|width| {
+                pane.resize(width as f32);
+                let nodes = pane.draw();
+                (
+                    width,
+                    only_node(&nodes, STRIP_ID).bounds.size.width,
+                    only_node(&nodes, "session-tunnel-pill").bounds.size.width,
+                )
+            })
+            .collect();
+        (widest, widths)
+    };
+
+    let (_, bare) = sweep(environment_session());
+    let beside_a_wide_pill: Vec<_> = bare
+        .iter()
+        .filter(|(_, _, pill)| *pill > px(154.))
+        .collect();
+    for (width, strip, pill) in &beside_a_wide_pill {
+        assert!(
+            *strip >= floor - px(0.5),
+            "at {width} pixels a tabless strip keeps its floor beside a pill above its own: strip {strip:?}, pill \
+             {pill:?}"
+        );
+    }
+    assert!(
+        beside_a_wide_pill
+            .iter()
+            .any(|(_, strip, _)| (*strip - floor).abs() < px(0.5)),
+        "some width holds a tabless strip at exactly its floor: {bare:?}"
+    );
+
+    let (widest, tabbed) = sweep(environment_session_with_tabs(&["t1", "t2"]));
+    let (width, strip, pill) = tabbed
+        .iter()
+        .find(|(_, _, pill)| *pill < widest - px(1.))
+        .copied()
+        .unwrap_or_else(|| panic!("the premise: some width narrows the pill: {tabbed:?}"));
+    assert!(
+        strip > floor + px(1.),
+        "the pill gives up width while the strip still has more than its floor, at {width} pixels: strip {strip:?}, \
+         pill {pill:?} (widest {widest:?})"
+    );
+}
+
+/// Opening more terminals than fit used to leave New terminal at the end of the tabs, scrolled out of view, so the user
+/// could not reach it to open another (TODO.md's "Keep the new-terminal button reachable when terminal tabs
+/// overflow"). Pinned at the strip's right end, it stays in view however many tabs are open. Specified: in a 900-pixel
+/// pane, for a container environment's session with twelve shell tabs, the last tab is not wholly visible (the premise:
+/// the tabs overflow the strip), while New terminal is drawn whole, ends inside the strip, and ends left of the first
+/// text size control.
+#[test]
+fn many_tabs_keep_new_terminal_in_view_at_the_strips_end() {
+    use crate::terminal::set::{ADD_ID, STRIP_ID, tab_element_id};
+    use crate::terminal::text_size::SMALLER_ID;
+    let ids: Vec<String> = (1..=12).map(|n| format!("t{n}")).collect();
+    let tabs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut pane = RealPane::open(900., environment_session_with_tabs(&tabs));
+    let nodes = pane.draw();
+    let last = only_node(&nodes, &tab_element_id("t12"));
+    assert!(
+        last.visible_bounds.size.width < last.bounds.size.width,
+        "the premise: the tabs overflow the strip: last tab {:?}, visible {:?}",
+        last.bounds,
+        last.visible_bounds
+    );
+    let strip = only_node(&nodes, STRIP_ID).bounds;
+    let add = only_node(&nodes, ADD_ID);
+    let first_action = only_node(&nodes, SMALLER_ID).bounds;
+    assert!(
+        add.visible_bounds == add.bounds
+            && add.bounds.size.width > px(0.)
+            && add.bounds.right() <= strip.right() + px(0.5)
+            && add.bounds.right() <= first_action.left(),
+        "New terminal is whole, inside the strip and left of the actions: New terminal {:?}, visible {:?}, strip \
+         {strip:?}, first action {first_action:?}",
+        add.bounds,
+        add.visible_bounds
     );
 }
 
@@ -2906,9 +3021,12 @@ fn a_count_pill_at_650_pixels_keeps_its_whole_width() {
 /// 650-pixel pane, for a container environment's session with one shell tab, once the terminal lists one tunnel to a
 /// very long host name, the strip is narrower than its Agent tab alone; the Agent tab, the shell tab, its × and New
 /// terminal are each drawn once and track a focus handle; pressing Tab from where focus starts reaches each of them
-/// within 40 presses. Each focused control reveals a recognizable portion, including the centered marks on × and New
-/// terminal. The × sits at the end of an item wider than the strip, whose start is what scrolling to the item would
-/// show (`TerminalSet::reveal_focused`).
+/// within 40 presses (their order is the terminal set's tests',
+/// `tab_reaches_each_tab_then_its_close_then_new_terminal`). Each focused control reveals a recognizable portion,
+/// including the centered marks on × and New terminal. The × sits a few pixels into the start of an item wider than
+/// the strip, so scrolling to the item alone would leave most of it out of a strip this narrow; it is lined up with the
+/// strip's own edge instead (`TerminalSet::reveal_close`). Whether the focused × shows is the terminal set's tests'
+/// (`keyboard_focus_on_a_tab_or_its_close_shows_the_close`).
 #[test]
 fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
     use crate::terminal::set::{ADD_ID, AGENT_TAB_ID, STRIP_ID, close_element_id, tab_element_id};
@@ -2980,21 +3098,33 @@ fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
 /// The strip's floor beside a pill is the fit's to apply, and the row draws its left region without the fit when it
 /// has no actions to fit: no store, no session row, or a Delete in flight, whose progress then shows in place of the
 /// actions. Those rows were not part of the decision on the floor, so they keep the layout they had before it.
-/// A running Delete is the one a user meets with a pill showing. Specified: in a 1400-pixel pane with **Skip session
-/// confirmations** on, for a remote session, once the terminal lists one tunnel to a very long host name the strip is
-/// at least 112 pixels wide (the floor applies while the actions show); once the header's Delete is sent and left
-/// unanswered, the Delete's progress and the pill are drawn, no action is, and the strip has exactly the bounds it had
-/// before the pill showed (no floor).
+/// A running Delete is the one a user meets with a pill showing. The strip takes the region's free width either way,
+/// so the floor's absence shows in the layout's shape rather than in a width: without the fit there is no floor box,
+/// and the strip is the region's own child. Specified: in a 1400-pixel pane with **Skip session confirmations** on,
+/// for a remote session, once the terminal lists one tunnel to a very long host name the strip is at least 112 pixels
+/// wide and sits in a floor box inside the region (the floor applies while the actions show); once the header's Delete
+/// is sent and left unanswered, the Delete's progress and the pill are drawn, no action is, the strip is the region's
+/// own child (no floor box) and still ends left of the pill.
 #[test]
 fn a_running_delete_draws_the_strip_beside_a_pill_without_its_floor() {
     use crate::terminal::set::{STRIP_FLOOR_BESIDE_PILL, STRIP_ID};
+    // The element id of the strip's parent node in `nodes`, if it has one.
+    let parent_of_strip = |nodes: &[gpui::DriverNode]| {
+        let strip = only_node(nodes, STRIP_ID);
+        strip
+            .parent
+            .and_then(|parent| nodes.get(parent))
+            .and_then(|parent| parent.element_id.as_deref().map(str::to_owned))
+    };
     let mut pane = RealPane::open(1400., remote_session_skipping(true));
-    let bare = only_node(&pane.draw(), STRIP_ID).bounds;
+    pane.draw();
     pane.open_tunnel(&long_host());
-    let floored = only_node(&pane.draw(), STRIP_ID).bounds;
+    let nodes = pane.draw();
+    let floored = only_node(&nodes, STRIP_ID).bounds;
     assert!(
-        floored.size.width >= px(STRIP_FLOOR_BESIDE_PILL) && bare.size.width < floored.size.width,
-        "the premise: beside the pill and the actions the strip has its floor: {floored:?}, without the pill {bare:?}"
+        floored.size.width >= px(STRIP_FLOOR_BESIDE_PILL)
+            && parent_of_strip(&nodes).as_deref() != Some(TABS_SLOT),
+        "the premise: beside the pill and the actions the strip has its floor, in a box of its own: {floored:?}"
     );
     pane.header_action(Action::Delete);
     let nodes = pane.draw();
@@ -3017,9 +3147,15 @@ fn a_running_delete_draws_the_strip_beside_a_pill_without_its_floor() {
         );
     }
     assert_eq!(
-        only_node(&nodes, STRIP_ID).bounds,
-        bare,
-        "the strip is laid out as it was before the pill showed"
+        parent_of_strip(&nodes).as_deref(),
+        Some(TABS_SLOT),
+        "the strip is the region's own child: no floor box"
+    );
+    let strip = only_node(&nodes, STRIP_ID).bounds;
+    let pill = only_node(&nodes, "session-tunnel-pill").bounds;
+    assert!(
+        strip.right() <= pill.left(),
+        "the strip ends left of the pill: strip {strip:?}, pill {pill:?}"
     );
 }
 

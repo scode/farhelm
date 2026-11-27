@@ -69,7 +69,8 @@ mod tests;
 
 pub use banner::Banner;
 pub(crate) use button::{
-    BUTTON_JOIN_GAP, JoinSide, TEMPLATE_ROW_VERTICAL_INSET, TOOLBAR_ACTION_GAP, TOOLBAR_TEXT,
+    BUTTON_JOIN_GAP, JoinSide, TEMPLATE_ROW_VERTICAL_INSET, TERMINAL_TAB_CLOSE_SIDE,
+    TERMINAL_TAB_INSET, TOOLBAR_ACTION_GAP, TOOLBAR_ICON_GAP, TOOLBAR_TEXT,
 };
 pub use button::{Button, CONDENSED_GAP, Condensed, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;

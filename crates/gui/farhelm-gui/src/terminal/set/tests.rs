@@ -1,7 +1,7 @@
 //! Tests of the session view's terminal set: which streams it opens for a session's tabs and under which lease, what
 //! the strip lists and chooses, where focus goes, how tabs opened, closed and reaped elsewhere come and go, that a
 //! terminal whose stream stopped holds back no other, the bound on attached tabs, and New terminal and each tab's ×
-//! (its question, which tab it closes, and a refused close).
+//! (where it sits and when it shows, its question, which tab it closes, and a refused close).
 //!
 //! The window is the real main view over the helm client's fake channel, and its connection hands out fake terminals
 //! (`Connection::serve_terminals`), which play the helm's side of every stream and record what each was asked. A tab
@@ -19,7 +19,10 @@ use farhelm_helm_client::transfers::Transfers;
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, GridOutput};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
-use gpui::{Entity, SharedString, TestAppContext, VisualTestContext};
+use gpui::{
+    Bounds, Entity, FocusHandle, Modifiers, Pixels, Point, SharedString, TestAppContext,
+    VisualTestContext,
+};
 use serde_json::json;
 
 use super::{
@@ -34,7 +37,7 @@ use crate::session_list::tests::{listing_meta, painted, preferences, session};
 use crate::session_pane::SessionPane;
 use crate::terminal::attached::STATUS_RECONNECT_ID;
 use crate::terminal::attachments::{self, Offered};
-use crate::test_support::{self, click, keys, settle, started};
+use crate::test_support::{self, click, drawn, keys, settle, started};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -306,9 +309,10 @@ impl Window<'_> {
         }
     }
 
-    /// The left edges of every × the strip paints, in order. Found by the painted "×" anywhere inside the strip
-    /// rather than by the shell tabs' close ids, so a close control beside the Agent tab counts whatever it is named.
-    fn strip_closes(&mut self) -> Vec<f32> {
+    /// Where every close control in the strip is drawn, left to right. Found by an accessible name starting with
+    /// "Close" anywhere inside the strip rather than by the shell tabs' close ids, so a close control beside the Agent
+    /// tab counts whatever it is named; the × is an icon now, so there is no painted "×" to look for.
+    fn strip_closes(&mut self) -> Vec<Bounds<Pixels>> {
         let nodes = test_support::frame(self.cx);
         let in_strip = |mut at: usize| loop {
             if nodes[at].element_id.as_deref() == Some(STRIP_ID) {
@@ -319,14 +323,70 @@ impl Window<'_> {
                 None => return false,
             }
         };
-        let mut closes: Vec<f32> = nodes
+        let mut closes: Vec<Bounds<Pixels>> = nodes
             .iter()
             .enumerate()
-            .filter(|(at, node)| node.texts.iter().any(|text| text.text == "×") && in_strip(*at))
-            .map(|(_, node)| f32::from(node.bounds.origin.x))
+            .filter(|(at, node)| {
+                node.label
+                    .as_ref()
+                    .is_some_and(|label| label.starts_with("Close"))
+                    && in_strip(*at)
+            })
+            .map(|(_, node)| node.bounds)
             .collect();
-        closes.sort_by(f32::total_cmp);
+        closes.sort_by(|a, b| f32::from(a.origin.x).total_cmp(&f32::from(b.origin.x)));
         closes
+    }
+
+    /// Whether shell tab `tab`'s × shows (`Some(true)`) or is drawn transparent (`Some(false)`) in a fresh frame, by
+    /// its wrapper's `:shown` or `:hidden` debug selector, since the frame's record carries no opacity. `None` when the
+    /// strip draws neither, which no caller expects. Only the tabs these tests use have selectors here, because the
+    /// test context looks selectors up by `&'static str`.
+    fn close_shown(&mut self, tab: &str) -> Option<bool> {
+        let (shown, hidden) = match tab {
+            "t1" => (
+                "session-terminal-close-t1:shown",
+                "session-terminal-close-t1:hidden",
+            ),
+            "t2" => (
+                "session-terminal-close-t2:shown",
+                "session-terminal-close-t2:hidden",
+            ),
+            _ => panic!("no reveal selectors for {tab}"),
+        };
+        test_support::redraw(self.cx);
+        match (drawn(self.cx, shown), drawn(self.cx, hidden)) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Rest the pointer at `at`, as a real pointer reaches a place: one move, then whatever it wakes.
+    fn point_at(&mut self, at: Point<Pixels>) {
+        self.cx.simulate_mouse_move(at, None, Modifiers::none());
+        settle(self.cx);
+    }
+
+    /// Put keyboard focus on `handle` through the focus coordinator, as Tab would.
+    fn focus(&mut self, handle: &FocusHandle) {
+        self.cx
+            .update(|w, cx| crate::focus::focus_control(handle, &Mark::take(cx), w, cx));
+        settle(self.cx);
+    }
+
+    /// Shell tab `id`'s button's and ×'s focus handles.
+    fn tab_handles(&mut self, id: &str) -> (FocusHandle, FocusHandle) {
+        let set = self.set();
+        self.cx.update(|_, cx| {
+            let set = set.read(cx);
+            let tab = set
+                .tabs
+                .iter()
+                .find(|tab| tab.id == id)
+                .unwrap_or_else(|| panic!("{id} is listed"));
+            (tab.focus.clone(), tab.close_focus.clone())
+        })
     }
 
     /// The accessible name of the open question (its title, "Close Terminal 2?" for a tab's close), and how many
@@ -386,24 +446,43 @@ fn every_tab_attaches_under_the_views_lease_at_the_shown_terminals_size(cx: &mut
 /// SPEC.md, "Session view": a shell tab "can be closed individually, which kills that shell and its processes"; the
 /// agent terminal is not such a tab, and its agent stops only through the session's own Stop or Delete, each with its
 /// own question. A × beside Agent would offer to kill the agent from a control that reads as closing a shell (old
-/// `terminal-tabs.spec.ts`, "the strip labels tabs positionally and gives the agent terminal no close control").
-/// Specified: with no shell tabs the strip paints "Agent" and no ×; once the row lists t1 and t2, it paints "Agent",
-/// "Terminal 1" and "Terminal 2" and exactly two ×, each to the right of Terminal 1's tab, so none sits beside Agent.
+/// `terminal-tabs.spec.ts`, "the strip labels tabs positionally and gives the agent terminal no close control"). And
+/// a shell tab's × sits at its tab's left, inside the tab, so that none sits beside New terminal, where a press meant
+/// for New terminal used to close the last shell. Specified: with no shell tabs the strip draws "Agent" and no close
+/// control; once the row lists t1 and t2, it draws "Agent", "Terminal 1" and "Terminal 2" and exactly two close
+/// controls, the first inside Terminal 1's tab and the second inside Terminal 2's, each in the left half of its tab,
+/// none over the Agent tab, and New terminal right of both.
 #[gpui::test]
 fn the_agent_terminals_tab_has_no_close_control(cx: &mut TestAppContext) {
     let mut window = open(cx, snapshot(&[]));
     assert_eq!(window.strip_labels(), ["Agent"]);
-    assert_eq!(window.strip_closes(), [] as [f32; 0], "no × beside Agent");
+    assert_eq!(window.strip_closes(), [], "no close control beside Agent");
 
     window.push_tabs(&["t1", "t2"]);
     assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
     let closes = window.strip_closes();
-    assert_eq!(closes.len(), 2, "one × per shell tab: {closes:?}");
-    let first_tab = f32::from(test_support::bounds(window.cx, T1_TAB).right());
-    assert!(
-        closes.iter().all(|x| *x >= first_tab),
-        "every × is past Terminal 1's tab, none beside Agent: {closes:?} from {first_tab}"
+    assert_eq!(
+        closes.len(),
+        2,
+        "one close control per shell tab: {closes:?}"
     );
+    let agent = test_support::bounds(window.cx, AGENT_TAB_ID);
+    let add = test_support::bounds(window.cx, super::ADD_ID);
+    for (close, tab) in closes.iter().zip([T1_TAB, T2_TAB]) {
+        let tab = test_support::bounds(window.cx, tab);
+        assert!(
+            close.left() >= tab.left()
+                && close.right() <= tab.center().x
+                && close.top() >= tab.top()
+                && close.bottom() <= tab.bottom(),
+            "a close control inside the left half of its own tab: {close:?} in {tab:?}"
+        );
+        assert!(close.left() >= agent.right(), "none over Agent: {close:?}");
+        assert!(
+            close.right() < add.left(),
+            "none beside New terminal: {close:?}"
+        );
+    }
 }
 
 /// A shell session's main terminal runs the shell itself, and its row reads "Bash shell · No agent"; a tab called Agent
@@ -1941,6 +2020,100 @@ fn new_terminal_opens_a_tab_and_shows_it(cx: &mut TestAppContext) {
     assert_eq!(window.chosen().as_deref(), Some("t2"));
 }
 
+/// The accident this plan set out to remove, in the form its landing found: pressing New terminal twice without moving
+/// the pointer. When New terminal sat right after the last tab, the tab the first press opened took its place, and the
+/// second press landed on that tab's × (shown, since the pointer was over the tab), which asked to close the shell just
+/// opened, or with Skip session confirmations on closed it at once. New terminal is now pinned at the tab area's right
+/// end (the plan's 2026-11-27 decision; SPEC.md, "Session view"). Specified, with Skip session confirmations off and
+/// on, and Terminal 1 already open: a press at New terminal's center sends one `POST /api/sessions/a/tabs`; once it is
+/// answered with t2 and the row lists t1 and t2 (the premise: Terminal 2 and its × are drawn, away from that point, and
+/// New terminal's center has not moved), a second press at the same point sends another `POST /api/sessions/a/tabs`
+/// and nothing else, and draws no close question.
+#[gpui::test]
+fn a_second_new_terminal_press_at_the_same_spot_opens_another_tab(cx: &mut TestAppContext) {
+    second_new_terminal_press(cx, false);
+}
+
+/// [`a_second_new_terminal_press_at_the_same_spot_opens_another_tab`] with Skip session confirmations on, where a
+/// press on the new tab's × would have closed it with no question at all.
+#[gpui::test]
+fn a_second_new_terminal_press_at_the_same_spot_opens_another_tab_when_skipping_questions(
+    cx: &mut TestAppContext,
+) {
+    second_new_terminal_press(cx, true);
+}
+
+/// The double-press scenario of the two tests above, with Skip session confirmations `skip`.
+fn second_new_terminal_press(cx: &mut TestAppContext, skip: bool) {
+    let mut window = open(
+        cx,
+        if skip {
+            skipping(&["t1"])
+        } else {
+            snapshot(&["t1"])
+        },
+    );
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    tab_requests(&mut window.helm);
+    let posts = |sent: &[(u64, farhelm_helm_client::Method, String)]| {
+        sent.iter()
+            .map(|(_, method, path)| (*method, path.clone()))
+            .collect::<Vec<_>>()
+    };
+    let open_one = vec![(
+        farhelm_helm_client::Method::Post,
+        "/api/sessions/a/tabs".to_owned(),
+    )];
+
+    let at = test_support::center(window.cx, super::ADD_ID);
+    window.cx.simulate_click(at, gpui::Modifiers::none());
+    settle(window.cx);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(posts(&sent), open_one, "the first press opens a tab");
+    window.push_tabs(&["t1", "t2"]);
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t2" } })));
+    settle(window.cx);
+    // The premise: Terminal 2 and its × are drawn, so whatever moved to make room for them has moved, and New terminal
+    // has not. Without the new tab on screen, a press at `at` would reach New terminal under any layout.
+    let nodes = test_support::frame(window.cx);
+    let drawn = |id: &str| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .map(|node| node.bounds)
+            .unwrap_or_else(|| panic!("the premise: {id} is drawn"))
+    };
+    let (tab, close) = (
+        drawn(&tab_element_id("t2")),
+        drawn(&super::close_element_id("t2")),
+    );
+    assert!(
+        !close.contains(&at) && !tab.contains(&at),
+        "the premise: the second press is not aimed at Terminal 2: tab {tab:?}, × {close:?}, press {at:?}"
+    );
+    assert_eq!(
+        test_support::center(window.cx, super::ADD_ID),
+        at,
+        "the premise: New terminal stayed where it was"
+    );
+
+    window.cx.simulate_click(at, gpui::Modifiers::none());
+    settle(window.cx);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(
+        posts(&sent),
+        open_one,
+        "the second press opens another tab and closes nothing (skip {skip})"
+    );
+    assert!(
+        !test_support::drawn(window.cx, "prompt-confirm"),
+        "no close question opened"
+    );
+}
+
 /// SPEC.md, "Who may move focus": once the user has moved on, a result moves no focus. Here the reply comes before the
 /// row lists the new shell, and the user has clicked back into the agent and typed; when the row arrives the shell must
 /// not be chosen, because hiding the agent would send focus home to the shell, where Enter could run the rest of what
@@ -2430,6 +2603,268 @@ fn skipped_questions_close_at_once_side_by_side_and_a_refusal_shows_on_its_tab(
     assert!(
         painted.contains("Close tab: ") && painted.contains("no such terminal tab"),
         "{painted}"
+    );
+}
+
+// ---- The ×'s place and when it shows ---------------------------------------------------------------------------------
+
+/// A point on shell tab `tab`'s name, clear of the leading slot the × covers: its right end.
+fn on_name(window: &mut Window, tab: &'static str) -> Point<Pixels> {
+    let tab = test_support::bounds(window.cx, tab);
+    gpui::point(tab.right() - gpui::px(4.), tab.center().y)
+}
+
+/// A point well away from the strip, in the shown terminal.
+fn away_from_the_strip(window: &mut Window) -> Point<Pixels> {
+    let strip = test_support::bounds(window.cx, STRIP_ID);
+    gpui::point(strip.center().x, strip.bottom() + gpui::px(200.))
+}
+
+/// The × moved from the always-shown right end of its tab, where the last tab's × sat beside New terminal, to the
+/// tab's leading slot, so that a press meant for New terminal stops closing shells. It must still show the moment the
+/// user points at the tab, on any shell tab and only that one, and stay while the pointer moves onto it; a key typed
+/// with the pointer resting there must not hide it (GPUI's own hover styles stand down after a key press, which is why
+/// the strip records the hover itself). An inert strip takes no presses, so pointing at it shows nothing. Specified:
+/// with t1 and t2 and the pointer away from the strip, both ×s are hidden; with the pointer on Terminal 2's name,
+/// Terminal 2's × shows and Terminal 1's does not; on Terminal 2's × it still shows, and still after a typed key; on
+/// the Agent tab both are hidden; once the set is inert, the pointer on Terminal 1's name leaves its × hidden.
+#[gpui::test]
+fn a_tabs_close_shows_while_the_pointer_is_over_its_tab(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let away = away_from_the_strip(&mut window);
+    window.point_at(away);
+    assert_eq!(window.close_shown("t1"), Some(false), "hidden at rest");
+    assert_eq!(window.close_shown("t2"), Some(false), "hidden at rest");
+
+    let name = on_name(&mut window, T2_TAB);
+    window.point_at(name);
+    assert_eq!(window.close_shown("t2"), Some(true), "the pointed-at tab's");
+    assert_eq!(window.close_shown("t1"), Some(false), "only that tab's");
+
+    let close = test_support::center(window.cx, "session-terminal-close-t2");
+    window.point_at(close);
+    assert_eq!(window.close_shown("t2"), Some(true), "on the × itself");
+    keys(window.cx, "x");
+    assert_eq!(
+        window.close_shown("t2"),
+        Some(true),
+        "a key typed with the pointer resting there"
+    );
+
+    let agent = test_support::center(window.cx, AGENT_TAB_ID);
+    window.point_at(agent);
+    assert_eq!(window.close_shown("t1"), Some(false));
+    assert_eq!(window.close_shown("t2"), Some(false));
+
+    let set = window.set();
+    window
+        .cx
+        .update(|_, cx| set.update(cx, |set, cx| set.set_inert(true, cx)));
+    settle(window.cx);
+    let name = on_name(&mut window, T1_TAB);
+    window.point_at(name);
+    assert_eq!(
+        window.close_shown("t1"),
+        Some(false),
+        "an inert strip shows none"
+    );
+}
+
+/// A keyboard user never points at a tab, so keyboard focus on a tab or on its × must show the ×: Tab reaches the × even
+/// while it is hidden, and focus on a control the user cannot see is the failure this rules out. Specified: with t1 and
+/// t2 and the pointer away from the strip, focus on Terminal 1's button shows Terminal 1's × and not Terminal 2's;
+/// focus on Terminal 1's × shows it; focus on New terminal hides both.
+#[gpui::test]
+fn keyboard_focus_on_a_tab_or_its_close_shows_the_close(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let away = away_from_the_strip(&mut window);
+    window.point_at(away);
+    let (tab, close) = window.tab_handles("t1");
+
+    window.focus(&tab);
+    assert_eq!(window.close_shown("t1"), Some(true), "focus on the tab");
+    assert_eq!(window.close_shown("t2"), Some(false), "only that tab's");
+    window.focus(&close);
+    assert_eq!(window.close_shown("t1"), Some(true), "focus on the ×");
+
+    let set = window.set();
+    let add = window.cx.update(|_, cx| set.read(cx).add_focus.clone());
+    window.focus(&add);
+    assert_eq!(window.close_shown("t1"), Some(false));
+    assert_eq!(window.close_shown("t2"), Some(false));
+}
+
+/// The close question hangs under the ×, and the user's pointer leaves the tab to reach the question's answers. A ×
+/// that vanished then would leave the question hanging from nothing and hide whose shell it is about to kill.
+/// Specified: with t1 and t2, a click on Terminal 1's × opens "Close Terminal 1?" with focus on its confirm; with the
+/// pointer on the question, off the strip, Terminal 1's × shows and Terminal 2's does not; once Cancel closes the
+/// question and focus is on New terminal, with the pointer off the strip, Terminal 1's × is hidden.
+#[gpui::test]
+fn an_open_close_question_keeps_its_close_shown(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    click(window.cx, "session-terminal-close-t1");
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 1?".to_owned()), 1),
+        "the premise: Terminal 1's question is open"
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: focus is in the question, not on the tab or its ×"
+    );
+    let question = test_support::bounds(window.cx, "prompt");
+    let strip = test_support::bounds(window.cx, STRIP_ID);
+    assert!(
+        question.top() >= strip.bottom(),
+        "the premise: the question is off the strip: {question:?}, strip {strip:?}"
+    );
+    window.point_at(question.center());
+    assert_eq!(window.close_shown("t1"), Some(true), "its question is open");
+    assert_eq!(window.close_shown("t2"), Some(false));
+
+    click(window.cx, "prompt-cancel");
+    let set = window.set();
+    let add = window.cx.update(|_, cx| set.read(cx).add_focus.clone());
+    window.focus(&add);
+    let away = away_from_the_strip(&mut window);
+    window.point_at(away);
+    assert_eq!(window.questions(), (None, 0), "the premise: no question");
+    assert_eq!(window.close_shown("t1"), Some(false), "the question closed");
+}
+
+/// A close in flight draws its × busy, and the user must still see which tab is going while the helm answers, wherever
+/// the pointer and focus have gone since. The × is also drawn over its tab, so a press on it lands on the tab too, and
+/// the tab must not take it: closing a tab the user is not looking at must not first show it and move focus into its
+/// shell. Specified: with Skip session confirmations on, t1 and t2 listed and the Agent terminal shown, a click on
+/// Terminal 1's × sends one DELETE for t1 and leaves the Agent terminal shown; with focus on New terminal and the
+/// pointer on the Agent tab, Terminal 1's × shows and Terminal 2's does not; once the helm refuses the close, Terminal
+/// 1's × is hidden.
+#[gpui::test]
+fn a_closing_tabs_close_stays_shown_until_the_helm_answers(cx: &mut TestAppContext) {
+    let mut window = open(cx, skipping(&["t1", "t2"]));
+    tab_requests(&mut window.helm);
+    assert_eq!(window.chosen(), None, "the premise: Agent is shown");
+    click(window.cx, "session-terminal-close-t1");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(
+        sent.iter()
+            .map(|(_, _, path)| path.as_str())
+            .collect::<Vec<_>>(),
+        ["/api/sessions/a/tabs/t1"]
+    );
+    assert_eq!(window.chosen(), None, "the press did not choose Terminal 1");
+
+    let set = window.set();
+    let add = window.cx.update(|_, cx| set.read(cx).add_focus.clone());
+    window.focus(&add);
+    let agent = test_support::center(window.cx, AGENT_TAB_ID);
+    window.point_at(agent);
+    assert_eq!(
+        window.close_shown("t1"),
+        Some(true),
+        "its close is in flight"
+    );
+    assert_eq!(window.close_shown("t2"), Some(false));
+
+    window.helm.reply(
+        sent[0].0,
+        500,
+        Some(json!({ "error": "injected close failure" })),
+    );
+    settle(window.cx);
+    assert_eq!(window.close_shown("t1"), Some(false), "the close settled");
+}
+
+/// A press on Terminal N's × must not also choose Terminal N, in the asking case too: the question takes focus, and a
+/// tab chosen by the same press would show a terminal the user did not ask for behind it. Specified: with t1 and t2 and
+/// the Agent terminal shown, a click on Terminal 2's × opens "Close Terminal 2?" with focus on its confirm, and the
+/// Agent terminal is still the one shown.
+#[gpui::test]
+fn pressing_a_tabs_close_does_not_choose_the_tab(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    assert_eq!(window.chosen(), None, "the premise: Agent is shown");
+    click(window.cx, "session-terminal-close-t2");
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 2?".to_owned()), 1)
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm")
+    );
+    assert_eq!(window.chosen(), None, "Terminal 2 was not chosen");
+}
+
+/// The point of moving the × was to stop presses landing on the wrong control. A × that pushed tabs or New terminal
+/// aside as it appeared would move targets under the pointer again, and a strip whose layout followed the pointer
+/// would also break GPUI's frame (`components::copy_field` has the rule). Specified: with t1 and t2, the bounds of both
+/// tabs, both ×s and New terminal are the same with the pointer off the strip, with the pointer on Terminal 2's name
+/// (its × shown), and with focus on Terminal 1's × (its × shown).
+#[gpui::test]
+fn showing_a_close_moves_nothing_in_the_strip(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let away = away_from_the_strip(&mut window);
+    let layout = |window: &mut Window| {
+        test_support::redraw(window.cx);
+        [
+            T1_TAB,
+            T2_TAB,
+            "session-terminal-close-t1",
+            "session-terminal-close-t2",
+            super::ADD_ID,
+        ]
+        .map(|id| test_support::bounds(window.cx, id))
+    };
+    window.point_at(away);
+    assert_eq!(
+        (window.close_shown("t1"), window.close_shown("t2")),
+        (Some(false), Some(false)),
+        "the premise: both hidden"
+    );
+    let rest = layout(&mut window);
+
+    let name = on_name(&mut window, T2_TAB);
+    window.point_at(name);
+    assert_eq!(window.close_shown("t2"), Some(true), "the premise: shown");
+    assert_eq!(layout(&mut window), rest, "pointing at a tab");
+
+    window.point_at(away);
+    let (_, close) = window.tab_handles("t1");
+    window.focus(&close);
+    assert_eq!(window.close_shown("t1"), Some(true), "the premise: shown");
+    assert_eq!(layout(&mut window), rest, "focus on a ×");
+}
+
+/// The × must stay reachable from the keyboard while it is hidden, and come right after its own tab, so a keyboard user
+/// meets each tab's close where they expect it; drawing it over the tab must not reorder Tab. Specified: with t1 and t2
+/// and focus on the Agent tab, five Tab presses reach Terminal 1, Close Terminal 1, Terminal 2, Close Terminal 2 and New
+/// terminal, in that order.
+#[gpui::test]
+fn tab_reaches_each_tab_then_its_close_then_new_terminal(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let set = window.set();
+    let agent = window.cx.update(|_, cx| set.read(cx).agent_focus.clone());
+    window.focus(&agent);
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some(AGENT_TAB_ID),
+        "the premise: focus starts on Agent"
+    );
+    let mut reached = Vec::new();
+    for _ in 0..5 {
+        keys(window.cx, "tab");
+        reached.push(test_support::focused_id(window.cx).unwrap_or_default());
+    }
+    assert_eq!(
+        reached,
+        [
+            T1_TAB,
+            "session-terminal-close-t1",
+            T2_TAB,
+            "session-terminal-close-t2",
+            super::ADD_ID,
+        ]
     );
 }
 
