@@ -145,12 +145,18 @@ Approved startup retry: failed Restart cleanup after session deletion. If Restar
 recorded Linux scope is gone after losing its session row, it records the session ID and launch generation in
 `supervisor.db` and keeps the replacement's launch record. Before binding its socket and while holding the
 state-directory lock, the supervisor retries these obligations even with an empty session table. If the launch record
-exists, it confirms that the recorded starter cannot start another host and that the host is gone before trusting the
-scope check. It derives the exact scope name from the recorded generation. If a session row or create reservation now
-owns the same session ID, the retry checks only that scope, since a session-wide process sweep could reach the restored
-session. Host reclaim leaves the pending generation's record and socket to the retry. Both checks share the startup
-budget. The launch record and obligation are retired once both checks pass. Invalid session IDs cannot name a scope and
-are discarded.
+exists, it confirms that the recorded starter cannot start another host before trusting the scope check, and then looks
+at the recorded socket. A replacement host that still answers there (Restart could not end it either) has already
+started its agent, so it can start nothing more. When no terminal holds its socket and its tag names exactly that
+session's agent at the recorded generation, the retry sweeps the scope and shuts the host down over the same connection.
+It ends the host even when the sweep fails: no session's terminal holds it, so only this retry (or the Delete of a
+session that reuses the ID) would end it, and the next start then finds the host gone. A host whose tag names anything
+else or cannot be read is left alone, with the record and the obligation. The retry derives the exact scope name from
+the recorded generation. If a session row or create reservation now owns the same session ID, the retry checks only that
+scope, since a session-wide process sweep could reach the restored session. Host reclaim leaves the pending generation's
+record and socket to the retry. Both checks share the startup budget. The launch record and obligation are retired once
+the scope check passes and the recorded host is confirmed gone or ended. Invalid session IDs cannot name a scope and are
+discarded.
 
 ## Session IDs in logs
 
