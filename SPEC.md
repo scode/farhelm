@@ -5732,11 +5732,12 @@ unavailable until the user changes that choice.
 
 Containers inherit proxy variables from the container host's systemd user manager environment at creation. Farhelm
 disables Podman's implicit HTTP-proxy inheritance and writes those values into the container user's `environment.d`, so
-its user manager and every session inherit the same settings. Later host changes affect newly created containers.
-Rootless Podman supplies the containment. Internet, LAN, tailnet and cloud metadata remain reachable, and this version
-adds no network policy or CPU/memory limits. The container host's Podman configuration still applies. Agents in
-containers follow the same rules as sandbox agents ([Agents and environments](#agents-and-environments)), including
-Delete requests and Clone from other hosts.
+its user manager and every session inherit the same settings. Later host changes affect newly created containers. Images
+Farhelm builds for a recipe do not keep the building host's proxy settings, though an image an earlier release built,
+and any image prepared on top of it since, keeps them until a Rebuild. Rootless Podman supplies the containment.
+Internet, LAN, tailnet and cloud metadata remain reachable, and this version adds no network policy or CPU/memory
+limits. The container host's Podman configuration still applies. Agents in containers follow the same rules as sandbox
+agents ([Agents and environments](#agents-and-environments)), including Delete requests and Clone from other hosts.
 
 Farhelm may pull the recipe's image when missing and the pinned managed Ubuntu base. Rebuild replaces both images only
 when the new software and prepared images are ready. If it fails, the previous images stay recorded and a ready place

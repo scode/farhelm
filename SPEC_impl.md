@@ -6643,11 +6643,17 @@ and clears `/etc/machine-id`. Stop the preparer cleanly before `podman commit`. 
 identity and learns it through the ordinary hello. A custom image supplies its reference and login user and must meet
 the same readiness contract. The concrete managed Ubuntu digest and login user are implementation choices.
 
-Read proxy variables from the place host's systemd user manager. Build and preparation use the probe's observation. At
-creation, read the manager again before installing the initial proxy settings for the session container. Use
-`--http-proxy=false` and write the selected variables into the container user's `environment.d`. PID 1's container
-environment alone does not reliably reach its user manager. This makes each session's proxy inheritance deterministic
-and independent of the helm's or SSH command's incidental environment.
+Read proxy variables from the place host's systemd user manager. Build and preparation use the probe's observation: each
+build command gets it in its private environment, and the preparer's running user manager imports it in memory. Image
+helpers never write the boot `environment.d` file, and every software and prepared capture removes that file first,
+refusing the capture if removal fails, so no container created from a new capture boots with the build host's proxies. A
+prepared image made on a software image an earlier release captured with the file hides it the same way, but still
+shares that image's layers, which keep the file, credentials included, in the host account's Podman storage until a
+Rebuild replaces the software image, by the maintainer's choice not to force legacy rebuilds. At creation, read the
+manager again before installing the initial proxy settings for the session container. Use `--http-proxy=false` and write
+the selected variables into the container user's `environment.d`. PID 1's container environment alone does not reliably
+reach its user manager. This makes each session's proxy inheritance deterministic and independent of the helm's or SSH
+command's incidental environment.
 
 Rebuild forces both the software build and preparation. The replacement images are owned in the retirement record until
 one edit under source exclusion publishes the pair and records the superseded images for retirement. A failed Rebuild

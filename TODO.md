@@ -228,21 +228,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   exceeded the triage size limit. See `SPEC.md` under “One GUI at a time” and `SPEC_impl.md` under “Questions: the
   prompt”. Plan: `plans/queue/settings-wait-while-saving.md`.
 
-- **Keep host proxy settings out of Podman recipe images.** Recipe build and preparation helpers write
-  `90-farhelm-proxy.conf` for their systemd user managers. A captured image can carry that file, including passwords, in
-  the host account's Podman storage. A new container can then keep a proxy the host removed, because systemd read the
-  image's file at boot before Farhelm imports the current settings. Remove the exact file before each software and
-  prepared image capture and require removal to succeed on the verified place. Use an explicit working directory the
-  recipe login can enter. A prepared image made from an older software image would still carry that image's layers even
-  after the file is removed from the helper. A same-version prepared image can also hit the cache directly. Track
-  proxy-free capture in image provenance and replace ineligible software and prepared images through the existing
-  publication and retirement paths. Check eligibility when a recipe names a Farhelm-built software image as its base as
-  well. Keep readiness in Settings aligned with launch eligibility, and preserve recorded build inputs and existing
-  sessions during the transition. Cover legacy-cache replacement, refusal before capture and the exact boot file for a
-  new container, including a removed key and a different key set to empty. The capture and boot-file changes alone
-  exceeded the triage size target, and the cache transition needs its own coverage to preserve working recipes. Plan:
-  `plans/queue/podman-proxy-free-images.md`.
-
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
   Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read

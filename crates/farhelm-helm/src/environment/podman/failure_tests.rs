@@ -36,20 +36,19 @@ pub(crate) const COMMAND_PHASES: &[&str] = &[
     "software-run",
     "software-login",
     "readiness",
-    "software-proxy-read",
-    "software-proxy-directory",
-    "software-proxy-write",
     "packages",
     "claude",
     "codex",
     "software-finalize",
+    "software-proxy-read",
+    "software-proxy-scrub",
     "software-stop",
     "software-commit",
     "prepare-run",
     "prepare-login",
-    "prepare-proxy-read",
-    "prepare-proxy-directory",
     "prepare-proxy-write",
+    "prepare-proxy-read",
+    "prepare-proxy-scrub",
     "prepare-stop",
     "prepare-commit",
 ];
@@ -57,9 +56,7 @@ pub(crate) const COMMAND_PHASES: &[&str] = &[
 /// an injected installer failure did not merely hit an earlier same-name call.
 pub(crate) const BACKEND_PHASES: &[(u64, &str)] = &[
     (2, "prepare-sandbox"),
-    (2, "write-proxy"),
     (3, "prepare-sandbox"),
-    (3, "write-proxy"),
     (3, "inspect"),
     (3, "check-supervisor-state"),
     (3, "create-directories"),
@@ -81,6 +78,11 @@ struct Container {
     stage: String,
     image: String,
     status: String,
+    /// Whether the container's filesystem holds the user manager's boot proxy
+    /// file. It comes from the image the container was run from, only a
+    /// successful scrub removes it, and a commit carries it into the image:
+    /// enough to show whether a capture can keep build-time proxies.
+    boot_proxy: bool,
 }
 
 /// Committed images inherit the helper's ownership labels. Pulled bases have
@@ -90,6 +92,8 @@ struct Image {
     id: String,
     artifact: String,
     owned: bool,
+    /// The captured boot proxy file, as [`Container::boot_proxy`] describes.
+    boot_proxy: bool,
 }
 
 /// Command inputs and fault controls are independent of resource state. Cleanup
@@ -192,8 +196,21 @@ impl Commands {
                 stage: "session".into(),
                 image: String::new(),
                 status: "running".into(),
+                boot_proxy: false,
             },
         );
+    }
+    /// Give an existing image the boot proxy file, the way a software image an
+    /// earlier release captured still carries the one its build wrote.
+    fn plant_boot_proxy(&self, image: &str) {
+        let id = self.image(image).expect("plant into an existing image").id;
+        self.state
+            .lock()
+            .unwrap()
+            .images
+            .get_mut(&id)
+            .unwrap()
+            .boot_proxy = true;
     }
     /// Whether a `podman rm` has been sent, held or not.
     pub(crate) fn removal_sent(&self) -> bool {
@@ -488,6 +505,7 @@ impl Commands {
                         id: last.into(),
                         owned: false,
                         artifact: String::new(),
+                        boot_proxy: false,
                     },
                 );
                 Ok(output(0, ""))
@@ -586,6 +604,13 @@ impl Commands {
                     anyhow::bail!("injected unanswered run before observation");
                 }
                 let image_offset = args.iter().position(|arg| arg == "--").unwrap() + 1;
+                let boot_proxy = self
+                    .image(&args[image_offset])
+                    .is_some_and(|image| image.boot_proxy);
+                if boot_proxy {
+                    self.phases
+                        .send_modify(|phases| phases.push(format!("{stage}-inherited-boot-proxy")));
+                }
                 let id = {
                     let mut state = self.state.lock().unwrap();
                     state.next_container += 1;
@@ -603,6 +628,7 @@ impl Commands {
                             } else {
                                 "running".into()
                             },
+                            boot_proxy,
                         },
                     );
                     id
@@ -642,6 +668,17 @@ impl Commands {
                     format!("{}-proxy-read", item.stage)
                 } else if script.contains("systemctl --user unset-environment") {
                     format!("{}-proxy-write", item.stage)
+                } else if script.contains("rm -f --") && script.contains("90-farhelm-proxy.conf") {
+                    assert!(
+                        args.windows(2).any(|pair| pair == ["--workdir", "/"]),
+                        "the scrub runs from `/`, not from the login home"
+                    );
+                    assert!(
+                        script
+                            .contains("'/home/ubuntu/.config/environment.d/90-farhelm-proxy.conf'"),
+                        "the scrub must remove the file the manager reads: {script}"
+                    );
+                    format!("{}-proxy-scrub", item.stage)
                 } else if script.contains("mkdir -p --") && script.contains("environment.d") {
                     format!("{}-proxy-directory", item.stage)
                 } else if script.contains("farhelm-build-packages.log") {
@@ -671,6 +708,15 @@ impl Commands {
                         failed.stderr.push_str(&format!(": {value}"));
                     }
                     return Ok(failed);
+                }
+                if phase.ends_with("-proxy-scrub") {
+                    self.state
+                        .lock()
+                        .unwrap()
+                        .containers
+                        .get_mut(&item.id)
+                        .unwrap()
+                        .boot_proxy = false;
                 }
                 Ok(output(
                     0,
@@ -735,6 +781,7 @@ impl Commands {
                         id: id.clone(),
                         artifact,
                         owned: true,
+                        boot_proxy: item.boot_proxy,
                     },
                 );
                 state.image_tags.insert(tag, id.clone());
@@ -1096,6 +1143,209 @@ async fn cold_provider_command_failures_cleanup_each_reachable_phase() {
             "{phase}: a definite command refusal cannot leave an unresolved absent commit tag"
         );
         f.commands.assert_ownership_accounted().await;
+    }
+}
+
+/// Image helpers must never write the boot proxy file: a capture would keep
+/// it, and every container created from the image would boot with the build
+/// host's proxies, a proxy password included, until its own create replaced
+/// them. Both captures scrub the file after the helper's last script step and
+/// before it is stopped for capture, so no later script can bring it back.
+#[farhelm_testtrace::test]
+async fn image_builds_write_no_boot_proxy_file_and_scrub_before_each_capture() {
+    let f = Fixture::new().await;
+    drop(f.prepare(&Progress::default()).await.unwrap());
+    for helper in [2, 3] {
+        assert!(
+            !f.backend_reached(helper, "write-proxy"),
+            "image helper {helper} wrote a boot proxy file"
+        );
+    }
+    let phases = f.commands.phases();
+    let at = |name: &str| {
+        phases
+            .iter()
+            .position(|phase| phase == name)
+            .unwrap_or_else(|| panic!("missing phase {name}: {phases:?}"))
+    };
+    assert!(at("software-finalize") < at("software-proxy-scrub"));
+    assert!(at("software-proxy-scrub") < at("software-stop"));
+    assert!(at("prepare-proxy-write") < at("prepare-proxy-scrub"));
+    assert!(at("prepare-proxy-scrub") < at("prepare-stop"));
+    let state = f.recipe_state().await;
+    for image in [state.image.unwrap().id, state.prepared.unwrap().id] {
+        assert!(!f.commands.image(&image).unwrap().boot_proxy, "{image}");
+    }
+}
+
+/// Earlier releases wrote the boot proxy file while building the software
+/// image, and a launch prepares a new image on that same software image
+/// without rebuilding it. The preparer's scrub is what keeps the old file,
+/// and the build host's proxies in it, out of the image sessions start from.
+#[farhelm_testtrace::test]
+async fn a_prepared_image_built_on_an_older_software_image_drops_its_boot_proxy_file() {
+    let f = Fixture::new().await;
+    drop(f.prepare(&Progress::default()).await.unwrap());
+    let before = f.recipe_state().await;
+    let software = before.image.unwrap().id;
+    let old = before.prepared.unwrap().id;
+    f.commands.plant_boot_proxy(&software);
+    // Losing the prepared image sends the next launch back to preparation on
+    // the recorded software image, which it reuses as it stands.
+    {
+        let mut state = f.commands.state.lock().unwrap();
+        state.images.remove(&old);
+        state.image_tags.retain(|_, id| id != &old);
+    }
+    let runs = f.commands.run_count();
+    drop(f.prepare(&Progress::default()).await.unwrap());
+    assert_eq!(
+        f.commands.run_count(),
+        runs + 1,
+        "only a preparer ran; the software image was reused"
+    );
+    assert!(
+        f.commands
+            .phases()
+            .iter()
+            .any(|phase| phase == "prepare-inherited-boot-proxy"),
+        "premise: the preparer started with the old file"
+    );
+    let after = f.recipe_state().await;
+    assert_eq!(after.image.unwrap().id, software);
+    let prepared = after.prepared.unwrap().id;
+    assert_ne!(prepared, old);
+    assert!(
+        !f.commands.image(&prepared).unwrap().boot_proxy,
+        "the prepared image kept the build host's boot proxy file"
+    );
+}
+
+/// A scrub that fails leaves the file in the helper, so saving the image then
+/// would publish it. The capture is refused instead: the helper is never
+/// stopped for its commit, and no image is recorded for sessions to use.
+#[farhelm_testtrace::test]
+async fn a_failed_boot_proxy_scrub_refuses_the_capture() {
+    for stage in ["software", "prepare"] {
+        let f = Fixture::new().await;
+        let scrub = format!("{stage}-proxy-scrub");
+        f.commands.fail(&scrub);
+        assert!(f.prepare(&Progress::default()).await.is_err(), "{stage}");
+        assert_eq!(f.commands.failed(), Some(scrub));
+        let phases = f.commands.phases();
+        for later in [format!("{stage}-stop"), format!("{stage}-commit")] {
+            assert!(
+                !phases.contains(&later),
+                "{stage}: {later} after a failed scrub"
+            );
+        }
+        let state = f.recipe_state().await;
+        assert!(state.prepared.is_none(), "{stage}");
+        if stage == "software" {
+            assert!(state.image.is_none());
+        }
+        f.commands.assert_ownership_accounted().await;
+    }
+}
+
+/// A session created after the place's proxies changed boots with only the
+/// new values. It starts from the state an upgrade leaves: a software image
+/// an earlier release captured with the boot file, and a prepared image made
+/// on it after the upgrade, which the preparer's scrub must have cleaned, or
+/// the session would boot with the build host's file. Its own setup installs
+/// the boot file and imports the manager from the current map, in which one
+/// build-time key is gone and another is now set to empty. The
+/// boot file is rendered from that same map (`proxy_file`, whose absent and
+/// empty keys `proxy_writers_preserve_literal_values_and_omit_absent_names`
+/// pins), so the import's exports stand for both.
+#[farhelm_testtrace::test]
+async fn a_new_session_boots_with_only_the_current_proxies() {
+    let f = Fixture::new().await;
+    drop(f.prepare(&Progress::default()).await.unwrap());
+    let before = f.recipe_state().await;
+    let old = before.prepared.unwrap().id;
+    f.commands.plant_boot_proxy(&before.image.unwrap().id);
+    {
+        let mut state = f.commands.state.lock().unwrap();
+        state.images.remove(&old);
+        state.image_tags.retain(|_, id| id != &old);
+    }
+    let artifact = f.prepare(&Progress::default()).await.unwrap();
+    assert!(
+        f.commands
+            .phases()
+            .iter()
+            .any(|phase| phase == "prepare-inherited-boot-proxy"),
+        "premise: the new prepared image was made on a software image with the file"
+    );
+    // Built with the fixture's default place proxies: https_proxy holds the
+    // secret and HTTP_PROXY is empty. Now https_proxy is gone and no_proxy,
+    // absent at build time, is set to empty.
+    assert!(
+        f.commands
+            .state
+            .lock()
+            .unwrap()
+            .inputs
+            .iter()
+            .any(|(_, input)| String::from_utf8_lossy(input).contains("private-proxy-marker")),
+        "premise: the images were built with the old proxies"
+    );
+    let current = BTreeMap::from([("no_proxy".to_string(), String::new())]);
+    let provider = provider_with_proxy(&f, current).await;
+    let host = f
+        .store
+        .register_pending_session_container(
+            "farhelm-sess-current".into(),
+            "dev".into(),
+            f.place,
+            None,
+        )
+        .await
+        .unwrap();
+    let row = f
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == host)
+        .unwrap();
+    let events_before = f.backend_events().len();
+    let inputs_before = f.commands.state.lock().unwrap().inputs.len();
+    provider
+        .create(
+            &row.environment_binding().unwrap(),
+            Some(artifact),
+            &Progress::default(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !f.commands
+            .phases()
+            .iter()
+            .any(|phase| phase == "session-inherited-boot-proxy"),
+        "the session's image carried a build-time boot proxy file"
+    );
+    assert_eq!(
+        &f.backend_events()[events_before..],
+        &["write-proxy", "restart-supervisor"]
+    );
+    let state = f.commands.state.lock().unwrap();
+    let import = state.inputs[inputs_before..]
+        .iter()
+        .map(|(_, bytes)| std::str::from_utf8(bytes).unwrap())
+        .find(|input| input.contains("systemctl --user import-environment"))
+        .expect("the session's setup imports the current proxies");
+    assert!(import.contains("export 'no_proxy='\n"), "{import}");
+    assert!(import.contains("systemctl --user import-environment 'no_proxy' || exit 1"));
+    for stale in [
+        "export 'https_proxy",
+        "export 'HTTP_PROXY",
+        "private-proxy-marker",
+    ] {
+        assert!(!import.contains(stale), "{stale} survived: {import}");
     }
 }
 
