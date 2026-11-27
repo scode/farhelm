@@ -476,18 +476,31 @@ pub(crate) struct Sent {
 /// A failed read changes only the availability: the entries, order and
 /// counts the GUI holds stay as they were, because a read that failed is no
 /// evidence that anything was deleted. `None` means nothing changed.
+///
+/// Takes what was last sent BY VALUE and hands back what is sent now, so
+/// the record moves through here instead of being copied: this runs for
+/// every pushed collection on every feed bump, and a deep copy of the
+/// last-sent session list (every row's JSON value) on each run was a cost
+/// that grew with the fleet for nothing (the 2026-11-26 idle-CPU
+/// investigation, `lore/2026-11-26-desktop-idle-cpu.md`).
 pub(crate) fn diff(
     collection: Collection,
-    previous: &Sent,
+    previous: Sent,
     read: Result<Projected, String>,
 ) -> (Option<CollectionChanges>, Sent) {
-    let (meta, upsert, remove, entries) = match read {
+    let Sent {
+        meta: previous_meta,
+        entries: previous_entries,
+    } = previous;
+    let (meta, meta_changed, upsert, remove, entries) = match read {
         Err(error) => {
+            let availability = Availability::Unavailable { error };
+            let meta_changed = previous_meta.availability != availability;
             let meta = CollectionMeta {
-                availability: Availability::Unavailable { error },
-                ..previous.meta.clone()
+                availability,
+                ..previous_meta
             };
-            (meta, Vec::new(), Vec::new(), previous.entries.clone())
+            (meta, meta_changed, Vec::new(), Vec::new(), previous_entries)
         }
         Ok(projected) => {
             let outside = projected.selected_outside_query;
@@ -500,7 +513,7 @@ pub(crate) fn diff(
                 .collect();
             let mut upsert = Vec::new();
             for (key, value) in &projected.entries {
-                if previous.entries.get(key) != Some(value) {
+                if previous_entries.get(key) != Some(value) {
                     upsert.push(KeyedEntry {
                         key: key.clone(),
                         value: value.clone(),
@@ -508,11 +521,9 @@ pub(crate) fn diff(
                 }
             }
             let entries: BTreeMap<String, Value> = projected.entries.into_iter().collect();
-            let remove = previous
-                .entries
-                .keys()
-                .filter(|key| !entries.contains_key(*key))
-                .cloned()
+            let remove = previous_entries
+                .into_keys()
+                .filter(|key| !entries.contains_key(key))
                 .collect();
             let meta = CollectionMeta {
                 availability: Availability::Available,
@@ -522,11 +533,12 @@ pub(crate) fn diff(
                 selected_outside_query: outside,
                 selected_cut: projected.selected_cut,
             };
-            (meta, upsert, remove, entries)
+            let meta_changed = meta != previous_meta;
+            (meta, meta_changed, upsert, remove, entries)
         }
     };
     let sent = Sent { meta, entries };
-    if upsert.is_empty() && remove.is_empty() && sent.meta == previous.meta {
+    if upsert.is_empty() && remove.is_empty() && !meta_changed {
         return (None, sent);
     }
     let changes = CollectionChanges {
@@ -786,7 +798,7 @@ impl Channel {
                 },
                 entries: BTreeMap::new(),
             };
-            let (_, sent) = diff(spec.collection, &empty, read);
+            let (_, sent) = diff(spec.collection, empty, read);
             let entries = sent
                 .meta
                 .order
@@ -815,7 +827,11 @@ impl Channel {
         let mut messages = Vec::new();
         for spec in self.collections.clone() {
             let read = self.read(&spec, &self.query).await;
-            let previous = self.sent.get(&spec.collection).cloned().unwrap_or(Sent {
+            // Taken out of the record, not copied (see `diff`). Nothing
+            // between this take and the insert below awaits or can fail, so
+            // neither a cancelled future nor an error can leave the record
+            // missing.
+            let previous = self.sent.remove(&spec.collection).unwrap_or(Sent {
                 meta: CollectionMeta {
                     availability: Availability::Available,
                     order: Vec::new(),
@@ -826,7 +842,7 @@ impl Channel {
                 },
                 entries: BTreeMap::new(),
             });
-            let (changes, sent) = diff(spec.collection, &previous, read);
+            let (changes, sent) = diff(spec.collection, previous, read);
             self.sent.insert(spec.collection, sent);
             messages.extend(changes.map(ServerMessage::Changes));
         }

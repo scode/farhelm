@@ -9095,26 +9095,39 @@ impl HelmStore {
     /// successful list refresh from a live host calls this with the
     /// refresh's full result, never a partial update, so a session absent
     /// from `entries` is understood to no longer exist on that host and is
-    /// dropped from the cache along with it (a session appearing in a later
-    /// refresh under the same id simply overwrites its older cached self,
-    /// via the delete-then-insert below rather than any per-row update
-    /// logic).
+    /// dropped from the cache along with it.
     ///
-    /// Delete-then-insert in ONE transaction, never a partial mix: a caller
+    /// Wholesale in meaning, minimal in writes: the transaction compares
+    /// each fresh row with the stored one and touches only what differs —
+    /// an `INSERT` for an id the cache did not hold, an `UPDATE` for one
+    /// whose stored half changed, a `DELETE` for one that disappeared, and
+    /// nothing at all for a row written back exactly as it was. A settled
+    /// fleet re-lists the same rows on every refresh (the backstop poll,
+    /// and every hint a busy fleet sends), and rewriting all of them each
+    /// time cost serialization, page writes and write-ahead-log churn that
+    /// grew with the fleet for no change at all (the 2026-11-26 idle-CPU
+    /// investigation in `lore/2026-11-26-desktop-idle-cpu.md` measured it).
+    ///
+    /// All of it in ONE transaction, never a partial mix: a caller
     /// observing a failure here must be able to assume the OLD cache is
-    /// still intact rather than half-cleared, because the alternative — a
-    /// host's cache silently emptied by a refresh that itself failed
-    /// partway — would make a transient serialization error look
-    /// indistinguishable from "this host truly has zero sessions now."
+    /// still intact rather than half-rewritten, because the alternative — a
+    /// host's cache silently emptied or mixed by a refresh that itself
+    /// failed partway — would make a transient serialization error look
+    /// indistinguishable from a real change in what the host runs.
     /// Pinned by `replace_host_sessions_rolls_back_a_mid_batch_failure`
     /// below, which forces the failure with a duplicate id WITHIN one
     /// `entries` batch — a real primary-key collision the schema already
     /// rejects, not an injected fault — and asserts the pre-existing rows
-    /// survive untouched. (The plan's alternative of a poisoned row that
-    /// fails `serde_json` serialization was not used: `SessionInfo`
-    /// serializes infallibly for any value this module can construct, so
-    /// there is no such row to plant honestly; a genuine schema-level
-    /// constraint violation is the cheaper, and more realistic, seam.)
+    /// survive untouched. That seam is why a new id is a plain `INSERT`,
+    /// never an upsert: the first copy of a duplicated id takes the
+    /// `previous` entry (or inserts), the second finds nothing left to
+    /// match and inserts again, which collides. An `INSERT OR REPLACE`
+    /// would quietly accept the duplicate and the test would stop proving
+    /// anything. (The plan's alternative of a poisoned row that fails
+    /// `serde_json` serialization was not used: `SessionInfo` serializes
+    /// infallibly for any value this module can construct, so there is no
+    /// such row to plant honestly; a genuine schema-level constraint
+    /// violation is the cheaper, and more realistic, seam.)
     ///
     /// `created_at` is extracted from each `entry` into a column beside the
     /// payload as the identity cross-check every read applies to a decoded
@@ -9125,14 +9138,14 @@ impl HelmStore {
     /// cap is a fact about the list, and it has to be kept with the list so
     /// a cut cache served stale still says so (see [`HostRow::cache_truncated`]).
     ///
-    /// Two checks run inside the SAME transaction as the delete-then-insert,
-    /// against exactly the state a live refresh's caller cannot otherwise
-    /// observe atomically:
+    /// Two checks run inside the SAME transaction as the rewrite, against
+    /// exactly the state a live refresh's caller cannot otherwise observe
+    /// atomically:
     /// - **Host existence.** A refresh naming an id that has since been
     ///   removed is refused as [`HostStoreError::HostNotFound`] rather than
-    ///   quietly deleting zero rows and inserting zero more — an EMPTY
-    ///   `entries` batch against a gone host used to succeed silently
-    ///   (nothing to delete, nothing to insert, no error), which reads
+    ///   quietly writing nothing — an EMPTY `entries` batch against a gone
+    ///   host used to succeed silently (nothing to delete, nothing to
+    ///   insert, no error), which reads
     ///   identically to "this host truly has zero sessions" from the
     ///   caller's side even though the host does not exist at all.
     /// - **Identity binding.** `identity` must equal what is CURRENTLY
@@ -9196,10 +9209,11 @@ impl HelmStore {
                     actual: current,
                 }));
             }
-            // Read BEFORE the delete, inside the same transaction as the
+            // Read BEFORE any write, inside the same transaction as the
             // rewrite: this is the "what did we have" half of the
-            // changed-only answer, and any read outside the transaction
-            // could be describing a different moment than the write.
+            // changed-only answer (and of which rows to write at all), and
+            // any read outside the transaction could be describing a
+            // different moment than the write.
             //
             // BOTH stored halves, not just the payload: `created_at` is a
             // column of its own (the identity cross-check every read
@@ -9232,11 +9246,6 @@ impl HelmStore {
                 rows.collect::<Result<_, _>>()
                     .context("collecting the cache this refresh is replacing")?
             };
-            tx.execute(
-                "DELETE FROM session_cache WHERE host_id = ?1",
-                rusqlite::params![host],
-            )
-            .context("clearing the stale cache")?;
             let mut changed = false;
             for entry in entries {
                 let mut entry = entry.into_info();
@@ -9258,37 +9267,60 @@ impl HelmStore {
                     entry.status = crate::session_cache::merged_status(&old.status, entry.status);
                 }
                 let json = serde_json::to_string(&entry).context("serializing cached session")?;
-                tx.execute(
-                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![host, &entry.id, entry.created_at, json],
-                ).context("inserting cached session")?;
                 // A row that was already stored EXACTLY as it is being
-                // written back is not a change; anything else — a new id, a
-                // repaired timestamp, a different payload — is.
+                // written back is not a change and is not written; anything
+                // else — a new id, a repaired timestamp, a different
+                // payload — is both. A new id is a plain INSERT on purpose
+                // (see the rollback contract in this method's docs).
                 match previous.remove(&entry.id) {
                     Some((created_at, stored))
                         if created_at == entry.created_at && stored == json => {}
-                    _ => changed = true,
+                    Some(_) => {
+                        changed = true;
+                        tx.prepare_cached(
+                            "UPDATE session_cache SET created_at = ?3, info_json = ?4
+                             WHERE host_id = ?1 AND session_id = ?2",
+                        )
+                        .context("preparing the cached session update")?
+                        .execute(rusqlite::params![host, &entry.id, entry.created_at, json])
+                        .context("updating cached session")?;
+                    }
+                    None => {
+                        changed = true;
+                        tx.prepare_cached(
+                            "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                             VALUES (?1, ?2, ?3, ?4)",
+                        )
+                        .context("preparing the cached session insert")?
+                        .execute(rusqlite::params![host, &entry.id, entry.created_at, json])
+                        .context("inserting cached session")?;
+                    }
                 }
             }
             // Whatever is left in `previous` was cached a moment ago and is
             // not any more: a session that ended, was deleted, or moved
-            // hosts. Folded in before the commit so the generation below and
-            // the reported answer are the same judgement.
+            // hosts. Its row goes, and the departure is folded into the
+            // returned change flag before the commit.
             let changed = changed || !previous.is_empty();
-            if !truncated && !previous.is_empty() {
+            let mut removed_group_member = false;
+            for departed in previous.into_keys() {
+                tx.prepare_cached(
+                    "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
+                )
+                .context("preparing the departed session delete")?
+                .execute(rusqlite::params![host, &departed])
+                .context("deleting a departed cached session")?;
                 // A complete list from the same installation can prove a
                 // formerly cached member has gone, including after a lost
-                // Delete reply. An adoption emptied the old cache already.
-                let mut removed_group_member = false;
-                for departed in previous.into_keys() {
+                // Delete reply; a cut one cannot. An adoption emptied the old
+                // cache already.
+                if !truncated {
                     removed_group_member |=
                         session_groups::assign(&tx, &SessionKey::new(host, departed), None)?;
                 }
-                if removed_group_member {
-                    session_groups::prune_empty(&tx)?;
-                }
+            }
+            if removed_group_member {
+                session_groups::prune_empty(&tx)?;
             }
             // The cap flag is part of what this list IS, so a flip in it is
             // a change clients must re-read for: the notice it drives is on
@@ -23075,10 +23107,17 @@ mod tests {
 
     /// The transactional-replace contract: a batch that fails PARTWAY
     /// THROUGH must leave the pre-existing cache exactly as it was, not
-    /// half-cleared. The failure is a genuine primary-key collision (two
+    /// half-rewritten. The failure is a genuine primary-key collision (two
     /// entries sharing a `session_id` within one `entries` batch) rather
     /// than an injected fault — see `replace_host_sessions`'s own docs for
     /// why that is the more honest seam available here.
+    ///
+    /// Each failing batch writes to the cache before it collides, so the
+    /// assertions prove a rollback rather than an absence of writes: the
+    /// first changes a cached row (an UPDATE) and inserts new ones before a
+    /// duplicate of a NEW id collides; the second changes a cached row and
+    /// then repeats that CACHED id, the path where the first copy takes the
+    /// stored entry and the second, finding none left, inserts and collides.
     #[farhelm_testtrace::test]
     async fn replace_host_sessions_rolls_back_a_mid_batch_failure() {
         let (_dir, store) = fresh_store().await;
@@ -23092,34 +23131,185 @@ mod tests {
             )
             .await
             .expect("seed the cache");
+        let mut renamed = session("old-1", 100);
+        renamed.title = "renamed".to_string();
 
-        let poisoned = vec![
+        let duplicate_new_id = vec![
+            renamed.clone(),
             session("new-1", 300),
             session("dup", 400),
             session("dup", 500), // collides with the row just inserted above
         ];
+        let duplicate_cached_id = vec![
+            renamed.clone(),
+            session("old-1", 100), // collides with the cached row the first copy updated
+        ];
+        for poisoned in [duplicate_new_id, duplicate_cached_id] {
+            store
+                .replace_host_sessions(
+                    host,
+                    "rollback-identity",
+                    admitted_rows(host, poisoned),
+                    false,
+                )
+                .await
+                .expect_err("a duplicate id within one batch must fail the whole replace");
+
+            let mut rows: Vec<(String, String)> = store
+                .cached_sessions(host)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|s| (s.id, s.title))
+                .collect();
+            rows.sort();
+            assert_eq!(
+                rows,
+                vec![
+                    ("old-1".to_string(), session("old-1", 100).title),
+                    ("old-2".to_string(), session("old-2", 200).title),
+                ],
+                "a failed replace must leave the PRE-EXISTING cache untouched: no rename, no \
+                 inserted row"
+            );
+        }
+    }
+
+    /// Rows the connection has modified so far (SQLite's `total_changes()`),
+    /// the observable that tells "wrote nothing" apart from "rewrote the
+    /// same bytes". Only meaningful while nothing else writes through this
+    /// store, which holds for a fresh test store.
+    async fn rows_written(store: &HelmStore) -> u64 {
+        store
+            .conn
+            .call(
+                "read total changes",
+                |conn: &mut Connection| -> anyhow::Result<u64> { Ok(conn.total_changes()) },
+            )
+            .await
+            .unwrap()
+    }
+
+    /// The minimal-write half of the replacement contract: a refresh that
+    /// lists exactly what is cached writes no rows at all, and one that
+    /// changes, adds or drops a single session writes exactly that row.
+    /// Why it matters: a settled fleet is re-listed on every refresh (the
+    /// backstop poll, and each hint a busy fleet sends), and rewriting every
+    /// row each time was CPU, page and write-ahead-log churn that grew with
+    /// the fleet while nothing changed (`lore/2026-11-26-desktop-idle-cpu.md`).
+    /// The contents and the reported change flag are checked too, so a
+    /// "writes nothing" that also forgot to apply a change cannot pass.
+    #[farhelm_testtrace::test]
+    async fn replace_host_sessions_writes_only_what_changed() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "minimal@host", "minimal-identity").await;
+        let seeded = vec![session("a", 100), session("b", 200), session("c", 300)];
+        // The premise every zero below relies on: the counter sees this
+        // store's writes, three inserts for a three-row seed.
+        let before = rows_written(&store).await;
         store
             .replace_host_sessions(
                 host,
-                "rollback-identity",
-                admitted_rows(host, poisoned),
+                "minimal-identity",
+                admitted_rows(host, seeded.clone()),
                 false,
             )
             .await
-            .expect_err("a duplicate id within one batch must fail the whole replace");
+            .expect("seed the cache");
+        assert_eq!(
+            rows_written(&store).await - before,
+            3,
+            "the seed inserts three rows"
+        );
 
-        let mut ids: Vec<String> = store
+        let before = rows_written(&store).await;
+        let changed = store
+            .replace_host_sessions(
+                host,
+                "minimal-identity",
+                admitted_rows(host, seeded.clone()),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(!changed, "an identical refresh is not a change");
+        assert_eq!(
+            rows_written(&store).await - before,
+            0,
+            "an identical refresh writes no rows"
+        );
+
+        let mut renamed = seeded.clone();
+        renamed[1].title = "renamed".to_string();
+        let before = rows_written(&store).await;
+        let changed = store
+            .replace_host_sessions(
+                host,
+                "minimal-identity",
+                admitted_rows(host, renamed.clone()),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(changed, "a renamed session is a change");
+        assert_eq!(
+            rows_written(&store).await - before,
+            1,
+            "only the renamed row is written"
+        );
+        let titles: Vec<(String, String)> = store
             .cached_sessions(host)
             .await
             .unwrap()
             .into_iter()
-            .map(|s| s.id)
+            .map(|s| (s.id, s.title))
             .collect();
+        assert!(
+            titles.contains(&("b".to_string(), "renamed".to_string())),
+            "the rename is applied: {titles:?}"
+        );
+
+        let mut grown = renamed.clone();
+        grown.push(session("d", 400));
+        let before = rows_written(&store).await;
+        assert!(
+            store
+                .replace_host_sessions(
+                    host,
+                    "minimal-identity",
+                    admitted_rows(host, grown.clone()),
+                    false
+                )
+                .await
+                .unwrap(),
+            "a new session is a change"
+        );
+        assert_eq!(
+            rows_written(&store).await - before,
+            1,
+            "only the new row is written"
+        );
+
+        let shrunk: Vec<_> = grown.into_iter().filter(|s| s.id != "a").collect();
+        let before = rows_written(&store).await;
+        assert!(
+            store
+                .replace_host_sessions(host, "minimal-identity", admitted_rows(host, shrunk), false)
+                .await
+                .unwrap(),
+            "a departed session is a change"
+        );
+        assert_eq!(
+            rows_written(&store).await - before,
+            1,
+            "only the departed row is deleted"
+        );
+        let mut ids = cached_ids(&store, host).await;
         ids.sort();
         assert_eq!(
             ids,
-            vec!["old-1".to_string(), "old-2".to_string()],
-            "a failed replace must leave the PRE-EXISTING cache untouched, not partially cleared"
+            vec!["b", "c", "d"],
+            "the departed row is gone and the rest remain"
         );
     }
 
