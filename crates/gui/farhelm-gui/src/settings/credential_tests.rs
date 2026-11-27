@@ -351,6 +351,26 @@ fn a_close_save_does_not_close_over_work_started_while_it_ran(cx: &mut TestAppCo
     assert!(any_open(cx), "and nothing closes it later on its own");
 }
 
+/// SPEC.md, "Settings": the close question shows the affected page behind it when every affected form is on one page.
+/// Credentials holds two forms, its Tensorlake key and a credential editor, which count as that one page. Specified:
+/// with a key typed and a new endpoint token's draft open, Close from Sessions names both forms and shows Credentials.
+#[gpui::test]
+fn two_drafts_on_credentials_show_that_page_behind_the_close_question(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_credentials(&mut helm, cx, json!([]));
+    fill(cx, "tensorlake-key", "fictional-tensorlake-key");
+    press(cx, "credentials-add-endpoint");
+    fill(cx, "credential-name", "test-endpoint");
+    fill(cx, "credential-secret", "fictional-endpoint-token");
+    click_section(cx, Section::Sessions);
+    click(cx, "settings-close");
+    assert_eq!(
+        label_of(cx, "settings-close-unsaved").as_deref(),
+        Some("Unsaved: Tensorlake API key in Credentials, Credential")
+    );
+    assert_eq!(super::tests::heading(cx).as_deref(), Some("Credentials"));
+}
+
 /// A delivery report already on screen when Close is pressed has been seen, so it must not keep Settings open again;
 /// only a report that arrives while the close waits does. Specified: a replacement answered with a missed host, the
 /// line shown; then a frames-switch save out on Sessions and Escape; the switch's answer closes Settings.
@@ -1274,7 +1294,7 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
         "nothing saved to test"
     );
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
-    reach(cx, "settings-footer-save");
+    reach(cx, super::tests::CREDENTIALS_SAVE);
     keys(cx, "space");
     let (id, method, path, body) = one_command(&mut helm);
     assert_eq!((method, path.as_str()), (Method::Put, "/api/tensorlake"));
@@ -1343,7 +1363,7 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
     assert_eq!(key_typed(cx), "", "Clear emptied the typed key");
 
     fill(cx, "tensorlake-key", "fictional-bad-key");
-    reach(cx, "settings-footer-save");
+    reach(cx, super::tests::CREDENTIALS_SAVE);
     keys(cx, "space");
     let (id, _, _, _) = one_command(&mut helm);
     helm.reply(id, 400, Some(json!("the key is not valid")));
@@ -1396,12 +1416,12 @@ fn the_tensorlake_key_waits_for_the_account_read(cx: &mut TestAppContext) {
             "{control} waits for the account"
         );
     }
-    assert!(!drawn(cx, "settings-footer-save"));
+    assert!(!drawn(cx, super::tests::CREDENTIALS_SAVE));
 
     answer(&mut helm, reads, &json!([]));
     settle(cx);
     assert!(painted(cx).contains("No key saved"));
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
     assert_eq!(key_typed(cx), "fictional-tensorlake-key");
-    assert_eq!(available(cx, "settings-footer-save"), Some(true));
+    assert_eq!(available(cx, super::tests::CREDENTIALS_SAVE), Some(true));
 }

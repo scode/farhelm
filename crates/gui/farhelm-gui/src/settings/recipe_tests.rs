@@ -763,7 +763,7 @@ fn a_key_saved_in_credentials_makes_build_available_with_no_read(cx: &mut TestAp
     helm.reply(reads[0].id, 200, Some(json!([])));
     settle(cx);
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
-    click(cx, "settings-footer-save");
+    click(cx, super::tests::CREDENTIALS_SAVE);
     let saves = sent(&mut helm);
     assert_eq!(
         saves

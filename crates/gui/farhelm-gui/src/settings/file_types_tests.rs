@@ -79,7 +79,7 @@ fn repeated_safe_types_do_not_hide_a_later_warning() {
 // ---- The field, over the fake helm ---------------------------------------------------------------------------------
 
 /// The field's Save.
-const SAVE: &str = "settings-footer-save";
+const SAVE: &str = "settings-footer-save-terminal";
 
 /// The preference row storing `list` as its file types; `None` never saved.
 fn row(list: Option<&str>) -> Preferences {

@@ -780,6 +780,9 @@ pub(crate) struct SettingsDialog {
     scroll_to_ntfy_refusal: bool,
     /// The explicit saves still owned by the last footer Save or close Save, sent one at a time.
     save_loop: Option<editing::SaveLoop>,
+    /// What the page footer's Save and Discard were last drawn offering, with whether the window has shown it, and
+    /// whether Discard was drawn and Save busy ([`SettingsDialog::page_answers`]).
+    page_frame: crate::prompt::ActionFrame<editing::PageAction, (bool, bool)>,
     /// A Close or Escape waiting for work to settle before it asks or closes (SPEC.md, "Settings").
     close_waiting: Option<editing::PendingClose>,
     /// The window the dialog is drawn in, for completions that arrive with no window at hand.
@@ -899,6 +902,7 @@ impl SettingsDialog {
             page_scroll: ScrollHandle::new(),
             scroll_to_ntfy_refusal: false,
             save_loop: None,
+            page_frame: crate::prompt::ActionFrame::default(),
             close_waiting: None,
             window: window.window_handle(),
             _operations: session::current_operations(cx).map(|operations| {
@@ -1865,9 +1869,12 @@ impl Render for SettingsDialog {
                 .map(|editor| custom_agents::Editor::footer(editor, cx)),
             _ => None,
         };
-        let pending = (!searching && editor_footer.is_none())
-            .then(|| self.page_answers(cx))
-            .flatten();
+        let pending = if !searching && editor_footer.is_none() {
+            self.page_answers(window, cx)
+        } else {
+            self.page_frame.clear();
+            None
+        };
         let confirming = editor_footer
             .as_ref()
             .is_some_and(|(_, _, confirming)| *confirming);

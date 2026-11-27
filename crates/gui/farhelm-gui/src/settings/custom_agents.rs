@@ -86,6 +86,29 @@ fn registration_name(id: &str, cx: &App) -> HostText {
     HostText::from_host(name)
 }
 
+/// What Settings' close question calls the draft of registration `id`: its display name as the helm pushes it, or,
+/// when the helm no longer lists it (deleted elsewhere while a draft was kept) or lists it with no name, the name
+/// `editor` last loaded, or else the stable ID. The sidebar names such a deleted draft by its ID
+/// ([`registration_name`]), so the two can differ for it.
+pub(super) fn close_name(id: &str, editor: &Editor, cx: &App) -> HostText {
+    let store = session::current_store(cx);
+    let pushed = store
+        .as_ref()
+        .and_then(|store| store.read(cx).collections().get::<CustomAgent>(id))
+        .map(|agent| agent.display_name.clone())
+        .filter(|name| !name.is_empty());
+    let name = pushed
+        .or_else(|| {
+            editor
+                .stored
+                .as_ref()
+                .map(|agent| agent.display_name.clone())
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| id.to_owned());
+    HostText::from_host(name)
+}
+
 /// Say why the list may be incomplete even while the editor can show a registration from the last successful read.
 pub(super) fn catalog_notice(cx: &App) -> Option<AnyElement> {
     let store = session::current_store(cx)?;

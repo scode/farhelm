@@ -103,7 +103,7 @@ fn a_saved_key_reads_the_list_which_says_when_it_found_none(cx: &mut TestAppCont
     assert!(!drawn(cx, "tensorlake-sandboxes-heading"));
 
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
-    click(cx, "settings-footer-save");
+    click(cx, super::tests::TENSORLAKE_SAVE);
     let save = sent(&mut helm);
     assert_eq!(save.len(), 1, "{save:?}");
     helm.reply(save[0].id, 200, Some(account(true, false)));
@@ -134,7 +134,7 @@ fn a_saved_key_reads_the_list_which_says_when_it_found_none(cx: &mut TestAppCont
     );
 
     fill(cx, "tensorlake-key", "fictional-replacement-key");
-    click(cx, "settings-footer-save");
+    click(cx, super::tests::TENSORLAKE_SAVE);
     let save = sent(&mut helm);
     assert_eq!(save.len(), 1, "{save:?}");
     helm.reply(save[0].id, 200, Some(account(true, false)));
@@ -623,10 +623,16 @@ fn asking_to_delete(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
     );
 }
 
-/// Type `key` into the key form shown now and save it from the footer, returning the one save that sends.
-fn save_key(helm: &mut FakeHelm, cx: &mut VisualTestContext, key: &str) -> FakeCommand {
+/// Type `key` into the key form shown now and save it with `save`, the shown page's footer Save, returning the one save
+/// that sends.
+fn save_key(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    key: &str,
+    save: &'static str,
+) -> FakeCommand {
     fill(cx, "tensorlake-key", key);
-    click(cx, "settings-footer-save");
+    click(cx, save);
     let save = sent(helm);
     assert_eq!(save.len(), 1, "{save:?}");
     assert_eq!(
@@ -656,7 +662,12 @@ fn a_key_replaced_in_credentials_retires_the_question_and_the_old_rows(cx: &mut 
     assert_eq!(reads[0].path, "/api/credentials");
     helm.reply(reads[0].id, 200, Some(json!([])));
     settle(cx);
-    let save = save_key(&mut helm, cx, "fictional-replacement-key");
+    let save = save_key(
+        &mut helm,
+        cx,
+        "fictional-replacement-key",
+        super::tests::CREDENTIALS_SAVE,
+    );
     helm.reply(save.id, 200, Some(account(true, false)));
     settle(cx);
     let read = one_list_read(&mut helm);
@@ -716,7 +727,12 @@ fn a_key_replaced_in_tensorlake_retires_the_question_and_ignores_the_old_read(
     let (mut helm, cx, _gear) = open_rail_with_hosts(cx, &[]);
     asking_to_delete(&mut helm, cx);
 
-    let save = save_key(&mut helm, cx, "fictional-replacement-key");
+    let save = save_key(
+        &mut helm,
+        cx,
+        "fictional-replacement-key",
+        super::tests::TENSORLAKE_SAVE,
+    );
     push_hosts(&mut helm, &[host(20, "tensorlake", connected())], cx);
     let old = one_list_read(&mut helm);
     assert!(
@@ -761,7 +777,12 @@ fn an_unreadable_key_save_answer_retires_the_question_and_reads_again(cx: &mut T
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     asking_to_delete(&mut helm, cx);
 
-    let save = save_key(&mut helm, cx, "fictional-replacement-key");
+    let save = save_key(
+        &mut helm,
+        cx,
+        "fictional-replacement-key",
+        super::tests::TENSORLAKE_SAVE,
+    );
     helm.reply(save.id, 200, Some(json!("saved")));
     settle(cx);
     assert!(!drawn(cx, "prompt-confirm"), "the question closed at once");
@@ -794,7 +815,12 @@ fn an_unreadable_key_save_answer_retires_the_question_and_reads_again(cx: &mut T
 fn a_delete_answered_after_the_key_changed_leaves_the_new_list_alone(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     asking_to_delete(&mut helm, cx);
-    let save = save_key(&mut helm, cx, "fictional-replacement-key");
+    let save = save_key(
+        &mut helm,
+        cx,
+        "fictional-replacement-key",
+        super::tests::TENSORLAKE_SAVE,
+    );
     click_in_view(cx, "prompt-confirm");
     let delete = sent(&mut helm);
     assert_eq!(delete.len(), 1, "{delete:?}");
