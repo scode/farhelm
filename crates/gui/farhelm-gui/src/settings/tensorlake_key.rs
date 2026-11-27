@@ -520,6 +520,9 @@ impl TensorlakeKey {
                         Outcome::Accepted(_) => {}
                     }
                     form.hold(cx);
+                    // After `empty_later`, so a waiting close sees the field emptied.
+                    let refused = matches!(form.outcome, Some((Err(_), _)));
+                    form.save_receipt.settled_other(refused, cx);
                 });
             })
         });
@@ -564,6 +567,8 @@ impl TensorlakeKey {
                     let typed = form.key.draft().value().clone();
                     form.outcome = Some((result.map(|result| test_message(result).into()), typed));
                     form.hold(cx);
+                    let failed = matches!(form.outcome, Some((Err(_), _)));
+                    form.save_receipt.settled_other(failed, cx);
                 });
             });
         if sent {

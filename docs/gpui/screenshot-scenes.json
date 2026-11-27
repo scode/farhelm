@@ -3824,11 +3824,6 @@
       "reference": null
     },
     {
-      "golden": "settings-close-save-held",
-      "title": "Settings' shared close refusal in the pinned footer at the minimum window height",
-      "reference": null
-    },
-    {
       "golden": "settings-credentials-key-conflict",
       "title": "Credentials after Save and Close refused two different Tensorlake keys",
       "reference": null

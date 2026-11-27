@@ -3863,15 +3863,15 @@ fingerprint bytes. Helm schema 67 stores the global `checkout_config.keep_spare`
 true, for fresh and upgraded databases. The configuration snapshot resolves it with root/hook/trust in one read, and the
 create constructor copies it into the retained payload. `GET`/`PUT /api/checkout-spare` exposes only an explicit
 `enabled` boolean through the protected owned-mutation router; writes announce invalidation and leave the path-preview
-revision unchanged. The Settings row uses the shared synchronous configuration-save fence, so a dismissed save finishes
-before a reopened read can seed another edit. No preference, host override or CLI setting is involved. A take runs
-inside the existing durable `CloneStarted` stage and preparation lock. It never reads the recovery record or acquires
-the repository cache lock. Git below 2.17 or unrecognized version output keeps the ordinary clone path: 2.17 is the
-floor for the take's `--prune-tags`, not a minimum for Farhelm. Local metadata queries are silent, limited to 4096
-stdout bytes and one second, with stdin closed, stderr discarded and the existing bounded process-group runner owning
-kill and reap. The ancestry check below shares that bound although it walks the newly fetched history, so on a very
-large fetch it can time out and decline to an ordinary clone after the fetch. Actual fetch and merge inherit the
-terminal and have no timeout.
+revision unchanged. A Settings close waits for the row's save; the shared synchronous configuration-save fence still
+makes a save that outlives the dialog (its window closing) finish before a reopened read can seed another edit. No
+preference, host override or CLI setting is involved. A take runs inside the existing durable `CloneStarted` stage and
+preparation lock. It never reads the recovery record or acquires the repository cache lock. Git below 2.17 or
+unrecognized version output keeps the ordinary clone path: 2.17 is the floor for the take's `--prune-tags`, not a
+minimum for Farhelm. Local metadata queries are silent, limited to 4096 stdout bytes and one second, with stdin closed,
+stderr discarded and the existing bounded process-group runner owning kill and reap. The ancestry check below shares
+that bound although it walks the newly fetched history, so on a very large fetch it can time out and decline to an
+ordinary clone after the fetch. Actual fetch and merge inherit the terminal and have no timeout.
 
 The shim derives the strict claim's session and generation from its actual launch-status filename, checks the session
 against the launch spec, and makes one no-replace rename from the ready slot to that claim. It opens both the reserved
@@ -6271,8 +6271,8 @@ echo secret input. Server URLs are http(s), at most 2048 bytes, without credenti
 ntfy's 64-character ASCII letter/digit/underscore/dash grammar and may be empty only while disabled. Tokens contain at
 most 4096 visible ASCII bytes. The form saves explicitly and shows its outcome; it never receives the stored token. POST
 `/api/ntfy-alerts/test` posts with saved settings even while disabled, bypasses queue/policy/cap, and waits on one owned
-send under the same timeout. Modal dismissal does not retract a save or test; component state is updated only while
-mounted.
+send under the same timeout. Closing Settings waits for a save or test that is out; one that outlives the dialog (its
+window closing) is not retracted, and component state is updated only while mounted.
 
 ## Named credential catalog
 
@@ -6398,8 +6398,8 @@ color and attention grouping independently of connection phase. No timer or sepa
 The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
 metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local. A
 credential editor waits for its accepted save or Delete: Back and Cancel are unavailable until the helm answers, so the
-reply always reaches the editor that sent it. A Delete still out when Settings closes (the close question lists only
-unsaved drafts) finishes without its view, with mounted fences preventing late responses from touching retired signals.
+reply always reaches the editor that sent it. A close waits for a Delete still out; one that outlives the dialog (its
+window closing) finishes without its view, with mounted fences preventing late responses from touching retired signals.
 A native file selection stages the Codex draft outside the text input. The editor presents the file's basename and the
 shared credential check's result. Save submits the staged text. Clear, an agent change or submission cancels an
 outstanding read, and an edit to the paste box takes precedence over the read. The metadata-only catalog reader also
@@ -6992,13 +6992,19 @@ cannot redirect typing that began before its animation frame. Settings puts the 
 actions in the dialog footer and pins refusals and progress just above the actions. The recipe's inline Delete question
 can replace that footer row. Add host keeps the recipe editor's leave handling for its embedded editor. Settings checks
 every loaded draft when asked to close and runs each form's own Save in sequence, waiting for its completion before
-sending the next. A refusal keeps Settings open and returns to the failed form. The add dialog uses Tensorlake's
-acknowledged `create_without_asking` setting, never the general setup preference, and refreshes the host list after an
-accepted or ambiguous submission. An inline Settings entry point opens its Tensorlake section. Rerun retains the
-Tensorlake plan kind, consults only that acknowledged setting, and offers no answer that writes the general SSH setup
-preference. The add dialog binds confirmation to a `ConfirmSlot` opening; accepted close retires it synchronously
-through the recipe close guard, before notifying its parent. Automatic submission consumes only the opening it just
-created, so a cancelled or replaced opening cannot authorize a later billed POST.
+sending the next. A refusal keeps Settings open and returns to the failed form. A close asked while a form's save, Test,
+Clear or editor Delete, a switch's save, or that sequence is out waits instead of asking. A form's own completion
+resumes it, after the form's follow-up updates, so the resumed close never sees a form between its reply and that
+follow-up. The dialog's switches record a refusal as soon as it arrives, so either their own completion or the operation
+store's notification may resume the close; only the store's notification can resume it for any preference-row save that
+no Settings form owns. A refusal met while waiting, or a credential replacement that missed hosts, keeps Settings open
+on that page. The add dialog uses Tensorlake's acknowledged `create_without_asking` setting, never the general setup
+preference, and refreshes the host list after an accepted or ambiguous submission. An inline Settings entry point opens
+its Tensorlake section. Rerun retains the Tensorlake plan kind, consults only that acknowledged setting, and offers no
+answer that writes the general SSH setup preference. The add dialog binds confirmation to a `ConfirmSlot` opening;
+accepted close retires it synchronously through the recipe close guard, before notifying its parent. Automatic
+submission consumes only the opening it just created, so a cancelled or replaced opening cannot authorize a later billed
+POST.
 
 The add form reuses the recipe list's summary helper and associates separate Name and Recipe help with their controls,
 keeping both accessible names exact. A displayed creation offer renders `SetupPlanConfirmation` directly as the existing

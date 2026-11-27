@@ -251,8 +251,8 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   permissions persist independently through the settings switches"; "automatic host updates default off and persist ..."
   for the default and the write): `each_switch_saves_its_own_preference_field_under_the_preferences_key`,
   `a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switch`,
-  `name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice`,
-  `a_save_in_flight_goes_on_after_the_dialog_closes`.
+  `name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice`; a close waiting for a switch's save,
+  `escape_waits_for_a_switch_save_then_closes` and `a_refused_switch_save_keeps_a_waiting_close_open_on_its_page`.
 - Following the helm (the live half of "... persist across clients", now that changes arrive live, and the host
   switches' help explaining the current behavior): `an_open_dialog_follows_a_change_made_elsewhere_with_its_help`.
 - Terminal ("terminal link segments keep native keys and descriptions", and "settings reports and reverts a refused
@@ -296,9 +296,10 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `checkouts_reads_its_routes_once_and_stays_locked_until_they_answer` (the untouched Save),
   `the_folder_saves_an_edited_draft_trimmed_and_reads_it_back` (trimmed, read back, "Checkout folder saved", an empty
   field clearing it), `a_refused_folder_discards_its_draft_and_keeps_the_reason_across_sections` (the refusal through a
-  section switch), `a_folder_save_in_flight_goes_on_after_the_dialog_closes`, and the failed read with its Retry, which
-  both old fields had: `a_failed_folder_read_shows_its_reason_and_retry_reads_again`. The field is the shared
-  `settings::CheckoutField`; its host scope is pinned in the `tests/host-checkout-folder.spec.ts` section below.
+  section switch), `a_folder_save_in_flight_holds_settings_open_until_done` (a close waiting for the save), and the
+  failed read with its Retry, which both old fields had: `a_failed_folder_read_shows_its_reason_and_retry_reads_again`.
+  The field is the shared `settings::CheckoutField`; its host scope is pinned in the
+  `tests/host-checkout-folder.spec.ts` section below.
 - Checkouts' post-clone command ("settings saves and clears the all-hosts post-clone command", "post-clone command stays
   locked until its initial read completes"):
   `the_post_clone_command_keeps_its_spacing_and_only_all_whitespace_clears_it` (verbatim with its spacing and line
@@ -309,9 +310,9 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `a_stored_carriage_return_survives_an_edit` pins that premise. Superseded too: "a pending post-clone save orders
   reopened settings before the next save", since the UI channel delivers in order (decided by the migration's
   orchestrator on 2026-11-16): a reopened Settings' read is admitted only after the pending save's reply, so the field
-  it fills is read-only until then and shows the saved command; no Settings code orders it.
-  `a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again` covers a conflict, a failed refresh and a second
-  save based on the value from Retry.
+  it fills is read-only until then and shows the saved command; no Settings code orders it (and a close now waits for
+  the save in any case). `a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again` covers a conflict, a
+  failed refresh and a second save based on the value from Retry.
 - Checkouts' drafts across sections ("checkout drafts survive switching sections and are discarded on close"):
   `an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog` (an unsaved command kept through a section
   switch with nothing sent, and the stored one shown after closing and opening again), and
@@ -343,10 +344,10 @@ refused (Deviations).
 
 Superseded: "settings frame-color rollback survives closing before failure". Settings keeps no optimistic copy (see
 "Every switch reports its refused save" under Deviations), so the terminal frames follow only the stored preference and
-never show the unsaved choice, and there is nothing to roll back; a save in flight when the dialog closes is
-`a_save_in_flight_goes_on_after_the_dialog_closes`. "settings gear stays clickable in the rail beside a long version in
-narrow windows": the build's version is in the sidebar's header here, not beside the gear on the rail's foot, and no
-window is narrower than 720 pixels; the gear's fixed place on the foot is the sidebar's
+never show the unsaved choice, and there is nothing to roll back; a close asked while a save is in flight waits for it,
+`escape_waits_for_a_switch_save_then_closes`. "settings gear stays clickable in the rail beside a long version in narrow
+windows": the build's version is in the sidebar's header here, not beside the gear on the rail's foot, and no window is
+narrower than 720 pixels; the gear's fixed place on the foot is the sidebar's
 (crates/gui/farhelm-gui/src/session_list/host_rail/tests.rs
 `the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help` and
 `a_long_host_list_scrolls_above_the_foot_which_stays_put`).
@@ -528,9 +529,9 @@ Create sandbox. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tensor
   the kind choice hidden, the editor taller than the body (the premise), its Cancel and Save in the footer below the
   scrolling body, and Tab from the editor's fields reaching Cancel, then Save; a done Save choosing the recipe is
   `a_done_save_chooses_the_new_recipe_and_returns_focus_to_recipe`. The rest is the shared code's, tested where it
-  lives: a refusal shown beside the pinned answers, with and without the leave question up, is the editor's answers
-  element (`settings/recipe_editor_tests.rs` `a_bad_name_or_size_is_refused_locally_until_the_next_edit`,
-  `settings/recipe_leave_tests.rs` `a_refused_save_takes_an_open_question_away`); Keep editing keeping the draft is
+  lives: a refusal shown beside the pinned answers is the editor's answers element (`settings/recipe_editor_tests.rs`
+  `a_bad_name_or_size_is_refused_locally_until_the_next_edit`, `settings/recipe_leave_tests.rs`
+  `a_refused_save_keeps_a_waiting_close_open_on_the_editor`); Keep editing keeping the draft is
   `every_way_out_asks_first_and_keep_editing_stays` there; the footer staying put while the body scrolls, and the whole
   card scrolling in a short window, are the dialog frame's (`components/tests/dialog.rs`
   `a_long_dialog_body_scrolls_and_the_answers_stay_visible`, `a_frame_too_tall_for_the_window_scrolls_as_a_whole`). The
@@ -1248,8 +1249,8 @@ with unsaved changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/r
   `settings-recipe-editor` and `settings-recipe-editor-end` show the editor's pinned actions. The centered leave
   question and inline delete confirmation are covered by `every_way_out_asks_first_and_keep_editing_stays` and
   `delete_asks_then_deletes_under_the_recipes_key`. No golden draws them. The reference screens have neither, and the
-  old case attached pictures for review. A refused save takes the leave question away and reveals the helm's words in
-  the editor, covered by `a_refused_save_takes_an_open_question_away`.
+  old case attached pictures for review. A refused save that a close waited for keeps Settings open on the editor with
+  the helm's words, covered by `a_refused_save_keeps_a_waiting_close_open_on_the_editor`.
 - "a managed recipe is created, edited and deleted without exposing its token": the help saying where tokens are added
   and that the recipe keeps their names, not their values, `recipe_credential_tests.rs`
   `the_editor_says_where_credentials_are_added_and_that_it_keeps_names`; that no secret reaches the window is the
@@ -1289,10 +1290,10 @@ with unsaved changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/r
   `discard_finishes_the_leave_without_saving`; Save finishing it once the save is done, and a refused save keeping the
   editor, `the_questions_save_finishes_the_leave_once_the_save_is_done`; a close from another section showing Recipes
   with the question first, `a_close_from_another_section_shows_recipes_first`; a close while the save is out waiting for
-  it and finishing even unanswered, `a_close_while_the_save_is_out_waits_for_it`, and one while a delete is out closing
-  at once, `a_close_while_the_delete_is_out_closes_at_once` (see "Recipes" under Deviations for both); a newer question
-  winning over an earlier answered Save, `keep_editing_after_an_earlier_save_answer_stays_in_settings`; and a refused
-  save taking an open question away, `a_refused_save_takes_an_open_question_away`.
+  it with no question, `a_close_while_the_save_is_out_waits_for_it`, and one while a delete is out closing at once,
+  `a_close_while_the_delete_is_out_closes_at_once` (see "Recipes" under Deviations for both); a second close during the
+  close question's Save asking nothing, `a_second_close_during_the_close_save_asks_nothing`; and a refused save keeping
+  the waiting close open on the editor, `a_refused_save_keeps_a_waiting_close_open_on_the_editor`.
 - "a recipe opening preserves a newer field focus before header close": the old editor focused its title in a frame
   after it mounted, and the spec held that frame to focus Name first. Here the opening's move to Back is the focus
   coordinator's waiting move (`Recipes::open_editor` calls `focus::focus_in_layer` with the press's mark), which waits
@@ -1597,9 +1598,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   Settings' own busy line ("Not saved: another operation was in progress. Try again."), which the terminal area's tunnel
   entry point gives as its refusal text.
 - **A tunnel switch refusal that arrives after Settings has closed is shown nowhere.** The old app's tunnel controller
-  put such a failure in its global tunnel notice when no control was left to show it. Here, as for every Settings save,
-  the reply settles nothing on screen once the dialog is gone; with no optimistic copy the switch's stored value is
-  still right when Settings opens again.
+  put such a failure in its global tunnel notice when no control was left to show it. A close waits for the switch's
+  save (SPEC.md, "Settings"), so this happens only when Settings goes without one, as when its window closes. Then, as
+  for every Settings save, the reply settles nothing on screen once the dialog is gone; with no optimistic copy the
+  switch's stored value is still right when Settings opens again.
 - **No one-pane layout at 620 pixels and below.** The old dialog showed either the section list or the section below
   that width, with "‹ Settings" to go back. The window's minimum width (720 pixels) is above it, so the layout is
   unreachable and is not built.
@@ -1739,20 +1741,24 @@ Where the port does not match the old app, and why. Each stays until the work na
   the two apart by the status alone, and the helm answers any cleanup failure of its timeout kind with a 504 too, so
   such a failure inside the bound also closes the editor; the row then shows the helm's own words for that failure while
   the recipe stays listed.
-- **While a save is out, the leave question offers Keep editing and Save, and no Discard.** The old question, asked by a
-  close during a save, drew all three answers and disabled every one until the save ended. The prompt cannot disable one
-  answer, and a Discard could not keep its word, since the draft on screen is the one being saved. Keep editing and the
-  question's Save stay usable: Save waits for the save already out. As in the old editor, that save's done answer
-  finishes the close even while the question is unanswered. A refused save takes the open question away, so the ordinary
-  answers return under the helm's words; the old question came back with all three answers.
+- **A close during a save waits for it in Settings; in Add host the leave question offers Keep editing and Save, and no
+  Discard.** The old question, asked by a close during a save, drew all three answers and disabled every one until the
+  save ended. Settings now asks nothing while the save is out and waits for its answer (SPEC.md, "Settings"): a done
+  save lets the close go on, and a refused one keeps Settings open on the editor with the helm's words. Add host's
+  embedded editor still asks. The prompt cannot disable one answer, and a Discard could not keep its word, since the
+  draft on screen is the one being saved. Keep editing and the question's Save stay usable: Save waits for the save
+  already out. As in the old editor, that save's done answer finishes the close even while the question is unanswered. A
+  refused save takes the open question away, so the ordinary answers return under the helm's words; the old question
+  came back with all three answers.
 - **A close while a delete is out closes at once.** The old editor asked the leave question then, with every answer
   disabled, and dropped the close once the delete succeeded. Here Settings closes without asking: the recipe is going,
   and the delete goes on in the operation store, its refusal, if any, shown under the recipe's row.
-- **A refused save that lands after Settings closed shows under the recipe's row.** Settings closing drops the editor,
-  so a refusal that arrives after it has nowhere else to show; it stays on the recipe's operation key, which the row's
-  build shares, and the row shows it in the helm's words until the recipe's next build or save starts or a push shows
-  the recipe start building. The old editor dropped such a refusal unseen. A refusal the editor showed itself leaves the
-  key, so it never shows twice.
+- **A refused save that lands after Settings closed shows under the recipe's row.** A close waits for the save, so this
+  happens only when Settings goes without one, as when its window closes. That drops the editor, so a refusal that
+  arrives after it has nowhere else to show; it stays on the recipe's operation key, which the row's build shares, and
+  the row shows it in the helm's words until the recipe's next build or save starts or a push shows the recipe start
+  building. The old editor dropped such a refusal unseen. A refusal the editor showed itself leaves the key, so it never
+  shows twice.
 - **A place's name comes from the pushed hosts.** The old rows named each place from `GET /api/environment-places`, and
   re-read the places whenever that list, read again on every feed notice and polled while a check ran, changed. Here the
   name is the host's own in the hosts collection the helm pushes, through the rule every host name follows, so a place
@@ -1810,9 +1816,10 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Focus moves to a field, not the editor's title.** The old editor put focus on its title (a heading made focusable)
   and Back returned it to the section's heading; headings are not controls here. Opening puts focus on Name for a new
   credential and on the secret for a saved one, and closing puts it on the list's Add button.
-- **Saves of one credential refuse each other**, with "Not saved: another operation was in progress" under the editor:
-  every save and delete of a credential is work on that credential's own operation key, which this section added. The
-  Tensorlake API key saves under the preference row's key, as all other helm configuration in Settings does.
+- **Every save and delete of a credential is work on that credential's own operation key**, which this section added.
+  The editor's Save and Delete wait for each other and a close waits for both, so nothing else meets that key while the
+  editor is open and the editor has no busy line. The Tensorlake API key saves under the preference row's key, as all
+  other helm configuration in Settings does.
 
 ### Tensorlake
 

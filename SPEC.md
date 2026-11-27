@@ -2737,12 +2737,16 @@ focus its trust switch when it is available. Section buttons follow the platform
 preserves unsaved fields, outcome lines and pending saves. A dot marks each edited field and section. The footer stays
 visible as the page scrolls. Switches outside forms save at once. Forms have one Save and Discard in the footer on pages
 with unsaved changes. The recipe and credential editors place their own actions there as well. For Checkouts, the same
-Save writes the changed folder and command in order. Closing with unsaved changes, from Escape or either Close control,
-asks once with the affected forms named and offers **Keep editing**, **Discard** and **Save**. Discard is absent while a
-save is in flight. A close that saves waits for pending operations and sends the remaining saves one at a time. The
-first failure keeps Settings open and shows the affected page with its error. Two different unsaved Tensorlake keys
-leave Settings open on Credentials with a message to save the desired key first. When Settings closes, focus returns to
-the control that opened it if it is still available, such as the gear or the Settings button in a hook hint.
+Save writes the changed folder and command in order. Closing, from Escape or either Close control, first waits for a
+save, Test, Clear or Delete still out, a switch's save included; recipe builds and deletes, leftover cleanup and Create
+SSH key carry on by themselves and do not hold it. A refusal among them keeps Settings open on its page, and any input
+in the meantime cancels that close. Then, with unsaved changes, closing asks once with the affected forms named and
+offers **Keep editing**, **Discard** and **Save**. A close that saves sends the saves one at a time. The first failure
+keeps Settings open and shows the affected page with its error. A credential replacement that missed hosts while
+Settings was closing keeps it open on the Credentials overview, where those hosts are listed. Two different unsaved
+Tensorlake keys leave Settings open on Credentials with a message to save the desired key first. When Settings closes,
+focus returns to the control that opened it if it is still available, such as the gear or the Settings button in a hook
+hint.
 
 The close answers apply to the drafts listed when the question opened. A page Save also applies only to the drafts it
 started with. New or changed drafts stay in Settings for a fresh action. If a dialog or menu opened from Settings still
@@ -5178,17 +5182,17 @@ environment.
   failed toggle or clear surfaces like any other operation. Turning the session-confirmation opt-out off restores
   confirmations as soon as the helm saves it; a refused save leaves them skipped and says so beside the switch, which
   goes back to the stored choice (the maintainer decided on 2026-11-14 that the desktop app follows the helm here rather
-  than restoring confirmations before the helm has saved the choice). Closing Settings before the save settles drops
-  that error. The error stays until that switch's next save starts. Quick-launch naming, terminal-frame colors, terminal
-  link-click behavior and trust-hint visibility instead put back the saved choice and show an adjacent error when their
-  newest save fails. So do the host setup and removal confirmation choices and turning the session-confirmation opt-out
-  on, which were silent before: with no optimistic copy a failed save never took effect, and silence would hide why the
-  switch snapped back. For naming, frame colors and link clicks, closing Settings drops only the alert: the shared
-  choice still reverts, so mounted terminals and later actions cannot keep using a failed save. Superseded results
-  neither report nor revert a newer choice. A trust-hint choice copied by a reopened Settings dialog or another mounted
-  hint also stops being current when its save fails; reopening while that save is pending does not keep the failed
-  choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable rather
-  than treating unknown trust as off. An ntfy save refused during the Settings close question leaves the form open with
+  than restoring confirmations before the helm has saved the choice). Closing Settings waits for that save, so a refusal
+  keeps Settings open with that error. The error stays until that switch's next save starts. Quick-launch naming,
+  terminal-frame colors, terminal link-click behavior and trust-hint visibility instead put back the saved choice and
+  show an adjacent error when their newest save fails. So do the host setup and removal confirmation choices and turning
+  the session-confirmation opt-out on, which were silent before: with no optimistic copy a failed save never took
+  effect, and silence would hide why the switch snapped back. For naming, frame colors and link clicks, the shared
+  choice reverts too, so mounted terminals and later actions cannot keep using a failed save. Superseded results neither
+  report nor revert a newer choice. A trust-hint choice copied by a reopened Settings dialog or another mounted hint
+  also stops being current when its save fails; reopening while that save is pending does not keep the failed choice
+  alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable rather than
+  treating unknown trust as off. An ntfy save refused while Settings is closing leaves Settings open on the form with
   its reason. The first visit to Notifications in the reopened dialog reads the saved ntfy settings from the helm.
 - Recording an ordinary dismissal of upgrade highlights (**Got it**, ×, or Escape) is best effort. If the save fails,
   the highlights can appear again at a later window start or reset.

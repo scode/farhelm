@@ -110,6 +110,8 @@ pub(super) struct Tensorlake {
     ask: Draft<bool>,
     /// Whether the switch's last press sent nothing because another Settings save held the key ([`Refused`]).
     refused: Refused,
+    /// Only its close continuation is used: a close waiting on the switch's save resumes from its completion.
+    pub(super) save_receipt: super::editing::SaveReceipt,
     /// Redraws the section when the account changes: the read, a retry, or a save from either key form.
     _account: Subscription,
 }
@@ -133,6 +135,7 @@ impl Tensorlake {
             sandboxes,
             ask: Draft::load(false),
             refused: Refused::default(),
+            save_receipt: super::editing::SaveReceipt::default(),
             _account: observing,
         }
     }
@@ -162,6 +165,11 @@ impl Tensorlake {
         self.stored(cx).map(|_| self.ask_focus.clone())
     }
 
+    /// Whether the switch's save is out, which holds a close ([`super::SettingsDialog::close_busy`]).
+    pub(super) fn holds_close(&self) -> bool {
+        self.ask.is_saving()
+    }
+
     /// The user turned the switch to `on`: save it (the module docs). Does nothing until the account is known, when
     /// the switch is drawn unavailable. A press during the switch's own save, or while another Settings save holds the
     /// key, sends nothing and says so under the switch.
@@ -181,11 +189,13 @@ impl Tensorlake {
             &OpKey::preferences(),
             |on| tensorlake_key::save_command(&ask_save(*on)),
             cx,
-            move |_, settled, cx| {
+            move |section, settled, cx| {
                 if let Outcome::Done(body) = &settled.outcome {
                     let body = body.clone();
                     account.update(cx, |account, cx| account.acknowledged(body, cx));
                 }
+                let refused = matches!(settled.outcome, Outcome::Refused(_));
+                section.save_receipt.settled_other(refused, cx);
             },
         );
         self.refused.record(ASK_ID, &started);

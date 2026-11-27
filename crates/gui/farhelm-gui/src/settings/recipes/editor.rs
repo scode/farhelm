@@ -284,7 +284,8 @@ pub(crate) struct Editor {
     error: Option<(HostText, Draft)>,
     /// Whether this editor's save is out.
     saving: bool,
-    /// Settings can wait on this editor in a batch. Add host handles departure on its own.
+    /// Settings' save loop and a waiting close hear this editor's save through it. Add host handles departure on its
+    /// own.
     pub(in crate::settings) save_receipt: crate::settings::editing::SaveReceipt,
     /// Whether this editor's Delete is out.
     deleting: bool,
@@ -465,11 +466,6 @@ impl Editor {
         crate::settings::editing::EditState::of(self.saving, self.asks_before_leaving(cx))
     }
 
-    /// Return to the editor's Save after a Settings close question disappears on refusal.
-    pub(in crate::settings) fn save_focus(&self) -> FocusHandle {
-        self.save_focus.clone()
-    }
-
     /// The error to show: the last one, while the draft is still what it was when it came.
     fn error(&self, cx: &App) -> Option<&HostText> {
         self.error
@@ -606,12 +602,15 @@ impl Editor {
         cx.notify();
     }
 
-    /// After a Save was asked: a started one locks the form and drops the last error; a busy key says so ([`Refused`]).
+    /// After a Save was asked: a started one locks the form, drops the last error and takes an unanswered inline Delete
+    /// confirmation away, since the newer answer (a Save from Settings' close question, say) wins over it; a busy key
+    /// says so ([`Refused`]).
     fn started(&mut self, started: Result<(), NotStarted>, cx: &mut Context<Self>) {
         self.refused.record(SAVE, &started);
         match started {
             Ok(()) => {
                 self.error = None;
+                self.delete_question = None;
                 self.set_saving(true, cx);
             }
             Err(not_started) => tracing::debug!(?not_started, "recipe not saved"),
