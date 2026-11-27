@@ -784,8 +784,7 @@ impl Supervisor {
                     // Shutdown can confirm one process ended while a second stage
                     // that has yet to bind can still start. Fence the record before
                     // an apparently empty scope can settle this launch.
-                    self.confirm_failed_restart_host_gone(artifacts, &HashSet::new())
-                        .await
+                    self.confirm_failed_restart_host_gone(artifacts).await
                 }
                 Err(error) => Err(anyhow::Error::msg(error)),
             };
@@ -912,13 +911,28 @@ impl Supervisor {
         RelaunchFailure::ambiguous(RequestError::new(ErrorKind::Conflict, message).into())
     }
 
-    /// Confirm exact launch cleanup before serving, even when no session rows remain.
-    /// Older obligations may have no record because the previous supervisor removed it
-    /// after confirming the host gone. If a record exists, its starter must be fenced
-    /// before an empty scope can satisfy the obligation.
+    /// Finish the scope cleanups that failed Restarts of deleted sessions left in
+    /// `supervisor.db`, before serving and even when no session rows remain.
+    ///
+    /// Each obligation names one launch generation, whose launch record (when one is left)
+    /// is settled first ([`Self::settle_failed_restart_host`]). Older obligations may have
+    /// no record because the previous supervisor removed it after confirming the host gone.
+    /// A record's starter must be fenced before an empty scope can satisfy the obligation,
+    /// since a start still under way could create the scope after the sweep looked.
+    ///
+    /// A replacement host that still answers at the recorded socket is the other shape a
+    /// failed teardown leaves (its sweep and its host's end both failed). Such a host has
+    /// already started its agent, so once its tag shows it is exactly this launch's, the
+    /// scope is swept and the host is shut down over the connection the settle opened.
+    /// Its record and the obligation are retired only once both the sweep and the host's
+    /// end are confirmed. A host with any other tag, or one that cannot be read, is left
+    /// alone with the record and the obligation, as is anything the settle cannot tell.
     pub(super) async fn retry_pending_scope_cleanups(&self, deadline: tokio::time::Instant) {
         // Leave enough of the remaining startup budget for the ordinary signals and confirmation after the
-        // optional Podman stop.
+        // optional Podman stop. An answering replacement host is shut down in that same remainder, after
+        // the sweep; `hosts::stop::shut_down` can take around 25 seconds at worst (its `Shutdown`, the
+        // end wait, then the verified signal's graces). The deadline cutting it short is safe: the record
+        // and the obligation are only retired after a confirmed end, so the next start tries again.
         let now = tokio::time::Instant::now();
         let podman_deadline = now
             + deadline
@@ -962,14 +976,48 @@ impl Supervisor {
                         }
                     }
                     let artifacts = LaunchArtifacts::for_launch(&self.state_dir, &id, generation);
-                    if let Err(error) = self
-                        .confirm_failed_restart_host_gone(&artifacts, &held.sockets)
+                    let answering = match self
+                        .settle_failed_restart_host(&artifacts, &held.sockets)
                         .await
                     {
-                        warn!(session = %id, generation, error = %format!("{error:#}"),
-                            "restart scope cleanup is waiting for its recorded host start");
-                        continue;
-                    }
+                        Ok(FailedRestartHost::Gone) => None,
+                        // Only a host tagged for exactly this session's launch generation
+                        // is the replacement the obligation was left for. Anything else at
+                        // the recorded socket says nothing about whether that replacement's
+                        // scope can still fill, so the host, the record and the obligation
+                        // are all left for a later start, untouched.
+                        Ok(FailedRestartHost::Answered {
+                            socket,
+                            connection,
+                            info,
+                        }) => match crate::hosts::HostTag::decode(&info.tag) {
+                            Ok(tag)
+                                if tag.session_id == id
+                                    && tag.role
+                                        == (crate::hosts::HostRole::Agent { generation }) =>
+                            {
+                                Some((socket, connection))
+                            }
+                            Ok(tag) => {
+                                warn!(session = %id, generation, socket = %socket.display(), ?tag,
+                                    "the failed restart's recorded socket serves a host for another \
+                                     terminal; leaving it and the restart scope cleanup in place");
+                                continue;
+                            }
+                            Err(unreadable) => {
+                                warn!(session = %id, generation, socket = %socket.display(),
+                                    %unreadable,
+                                    "the failed restart's recorded host carries a tag this build \
+                                     cannot read; leaving it and the restart scope cleanup in place");
+                                continue;
+                            }
+                        },
+                        Err(error) => {
+                            warn!(session = %id, generation, error = %format!("{error:#}"),
+                                "restart scope cleanup is waiting for its recorded host start");
+                            continue;
+                        }
+                    };
                     let sweep = if restored {
                         reap_recorded_scope(&self.seams.scopes, unit, &id, podman_deadline).await
                     } else {
@@ -984,9 +1032,44 @@ impl Supervisor {
                         )
                         .await
                     };
-                    if let Err(error) = sweep {
-                        warn!(session = %id, generation, error = %format!("{error:#}"),
-                            "restart scope cleanup is still unconfirmed");
+                    let swept = match sweep {
+                        Ok(_) => true,
+                        Err(error) => {
+                            warn!(session = %id, generation, error = %format!("{error:#}"),
+                                "restart scope cleanup is still unconfirmed");
+                            false
+                        }
+                    };
+                    // The answering host is ended even when the sweep failed. No session's
+                    // terminal holds it, so only this retry, or a Delete of a session that
+                    // reuses the ID (which settles every launch record of that ID), would
+                    // ever end it, and its hangup reaches the agent the sweep could not
+                    // confirm gone. With the host gone the next
+                    // start settles the record as gone and retries the sweep alone, the
+                    // shape this retry already handles; the record and the obligation stay
+                    // until both are confirmed.
+                    if let Some((socket, connection)) = answering {
+                        match crate::hosts::stop::shut_down(
+                            *connection,
+                            &socket,
+                            crate::hosts::StopLimits::default(),
+                        )
+                        .await
+                        {
+                            crate::hosts::HostOutcome::Stopped(how) => {
+                                info!(session = %id, generation, socket = %socket.display(),
+                                    how = %how, "ended a failed restart's terminal host");
+                                self.remove_ended_socket(&socket).await;
+                            }
+                            crate::hosts::HostOutcome::Unconfirmed(why) => {
+                                warn!(session = %id, generation, socket = %socket.display(), %why,
+                                    "a failed restart's terminal host may still run; its restart \
+                                     scope cleanup stays for the next start");
+                                continue;
+                            }
+                        }
+                    }
+                    if !swept {
                         continue;
                     }
                     if !artifacts.remove_host_record_best_effort().await {
@@ -1012,29 +1095,64 @@ impl Supervisor {
         }
     }
 
-    /// Settle the exact record before cleanup can trust a vacant scope. If a live terminal
-    /// still holds the socket, it may be part of a restored session and must stay connected.
+    /// Confirm that a failed Restart's replacement left no host running, for the unwind
+    /// of a replacement whose start failed ([`Self::unwind_failed_host_relaunch`]).
     ///
-    /// This also runs when an ordinary failed Restart unwinds with its row still present, not
-    /// only for a deleted session: it can wait for a still-running first stage, end it with the
-    /// verified signal and remove its socket before the unwind removes the record.
+    /// A host that answers at the recorded socket is an error here, never something to
+    /// end: an unwind that found its replacement live must keep the Restart ambiguous
+    /// rather than restore the previous terminal over a running agent. No held sockets
+    /// are checked: the recorded socket is the one this Restart's own failed start drew.
     async fn confirm_failed_restart_host_gone(
         &self,
         artifacts: &LaunchArtifacts,
-        held_sockets: &HashSet<OsString>,
     ) -> anyhow::Result<()> {
+        match self
+            .settle_failed_restart_host(artifacts, &HashSet::new())
+            .await?
+        {
+            FailedRestartHost::Gone => Ok(()),
+            // The connection drops here, which leaves the host as it was.
+            FailedRestartHost::Answered { socket, .. } => {
+                anyhow::bail!("the recorded host at {} is still running", socket.display())
+            }
+        }
+    }
+
+    /// Settle a failed Restart's exact launch record before cleanup can trust a vacant
+    /// scope: its first stage fenced, then what answers at its socket
+    /// ([`Self::settle_launch_record`]).
+    ///
+    /// [`FailedRestartHost::Gone`] when there is no record (or an empty one) or nothing
+    /// serves its socket, whose leftover file is then removed. A host that answers comes
+    /// back with the connection that now owns it, for the caller to judge by its tag. An
+    /// error for everything that cannot be told: a record that is not a regular file or
+    /// cannot be read, a first stage that may still run, something at the socket that
+    /// does not answer usefully, and a socket in `held_sockets`. A live terminal holding
+    /// the socket may be part of a restored session, and must stay connected and alone.
+    ///
+    /// This runs both for an ordinary failed Restart unwinding with its row still present
+    /// and for a deleted session's obligation at startup: it can wait for a still-running
+    /// first stage, end it with the verified signal and remove its socket before the
+    /// caller removes the record.
+    async fn settle_failed_restart_host(
+        &self,
+        artifacts: &LaunchArtifacts,
+        held_sockets: &HashSet<OsString>,
+    ) -> anyhow::Result<FailedRestartHost> {
         let path = artifacts.host();
         match tokio::fs::symlink_metadata(path).await {
             Ok(metadata) if metadata.is_file() => {}
             Ok(_) => anyhow::bail!("the failed restart's launch record is not a regular file"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(FailedRestartHost::Gone);
+            }
             Err(error) => {
                 return Err(anyhow::Error::new(error)
                     .context("checking the failed restart's launch record"));
             }
         }
         let Some(record) = super::read_launch_record(path).await? else {
-            return Ok(());
+            return Ok(FailedRestartHost::Gone);
         };
         crate::hosts::existing_hosts_dir(&std::path::absolute(&self.state_dir)?)?;
         let socket = self.recorded_socket(&record)?;
@@ -1047,16 +1165,38 @@ impl Supervisor {
         match self.settle_launch_record(&record, &socket).await {
             Ok(AtRecordedSocket::Gone) => {
                 self.remove_ended_socket(&socket).await;
-                Ok(())
+                Ok(FailedRestartHost::Gone)
             }
-            Ok(AtRecordedSocket::Answered { .. }) => {
-                anyhow::bail!("the recorded host at {} is still running", socket.display())
+            Ok(AtRecordedSocket::Answered { connection, info }) => {
+                Ok(FailedRestartHost::Answered {
+                    socket,
+                    connection,
+                    info,
+                })
             }
             Ok(AtRecordedSocket::NoAnswer(error)) => Err(error.into()),
             Ok(AtRecordedSocket::NoInfo { error, .. }) => Err(error.into()),
             Err(error) => Err(anyhow::Error::msg(error)),
         }
     }
+}
+
+/// What a failed Restart's launch record left, once settled
+/// ([`Supervisor::settle_failed_restart_host`]).
+enum FailedRestartHost {
+    /// No host runs at the recorded socket and none can start there: the record is
+    /// missing or empty, or its first stage is fenced and nothing serves the socket.
+    Gone,
+    /// A host answered at the recorded socket, which no terminal on the map holds. Its
+    /// first stage is fenced, and a host that answers has already started its one child,
+    /// so it can start nothing more. Whose host it is, `info`'s tag says; `connection`
+    /// owns the host now (boxed, as in [`AtRecordedSocket::Answered`]), and dropping it
+    /// leaves the host as it was.
+    Answered {
+        socket: PathBuf,
+        connection: Box<crate::hosts::HostConnection>,
+        info: terminal_host::protocol::Info,
+    },
 }
 
 #[cfg(test)]
@@ -1575,6 +1715,450 @@ mod tests {
             new_agent.kill().await.unwrap();
             serving.abort();
             assert!(serving.await.unwrap_err().is_cancelled());
+        }
+    }
+
+    // ---- A failed restart's replacement host that still answers ------------------------
+
+    /// A deleted restart's replacement host that still answers is cleaned up at the next
+    /// start: its scope swept, the host shut down, and its record and obligation retired.
+    ///
+    /// Why: when a Restart loses its row mid-relaunch and neither its new agent's scope
+    /// sweep nor the end of its new host succeeds, the host keeps answering at its
+    /// recorded socket. Startup host reclaim leaves that record and socket to the pending
+    /// cleanup, so if the cleanup treated an answering host as a reason to wait, nothing
+    /// would ever end the host, sweep the scope or retire the obligation (the bug this
+    /// pins). Spec: with a real host tagged for the session's pending generation answering
+    /// at the recorded socket, the scope present, and the record and obligation in place
+    /// (premises checked after the supervisor restarts), serving sends the scope SIGTERM
+    /// and checks it again, ends the host's process, removes its socket, and leaves no
+    /// record and no obligation.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn a_deleted_restarts_answering_replacement_is_ended_and_its_cleanup_retired_at_startup()
+    {
+        use super::super::tests::serve_until_answering;
+        use crate::scope::{ScopeManager, ScopeOp};
+
+        let state = StateDir::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let generation = 2;
+        let unit = crate::scope::unit_name(&id, generation).unwrap();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), &id, generation);
+        let sup = supervisor_with_scopes(
+            &state,
+            ScopeManager::fake_reprobing(false, false, Arc::new(|_| {})),
+        )
+        .await;
+        let (socket, host) = plant_answering_replacement(&sup, &state, &id, generation).await;
+        drop(sup);
+
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&observed);
+        let sup = supervisor_with_scopes(
+            &state,
+            ScopeManager::fake_vanishing_after_signal(
+                "SIGTERM",
+                Arc::new(move |op| sink.lock().unwrap().push(op.clone())),
+            ),
+        )
+        .await;
+        // The restart and its reload left everything the cleanup needs in place.
+        assert_replacement_answers(&socket, &id, generation).await;
+        assert!(host.is_running().unwrap());
+        // The fake answers existence only once its availability probe has run.
+        assert!(sup.seams.scopes.available().await);
+        assert!(sup.seams.scopes.exists(&unit).await.unwrap());
+        assert!(artifacts.host().is_file());
+        assert_eq!(
+            sup.store.pending_scope_cleanups().await.unwrap(),
+            [(id.clone(), generation)]
+        );
+        observed.lock().unwrap().clear();
+
+        let serving = serve_until_answering(&sup).await;
+        {
+            let operations = observed.lock().unwrap();
+            let signal = ScopeOp::Kill {
+                unit: unit.clone(),
+                signal: "SIGTERM".into(),
+            };
+            let sent = operations
+                .iter()
+                .position(|op| op == &signal)
+                .expect("startup signalled the replacement's scope");
+            assert!(operations[sent + 1..].contains(&ScopeOp::Exists(unit.clone())));
+        }
+        assert!(
+            !host.is_running().unwrap(),
+            "the answering replacement host was ended"
+        );
+        assert!(!socket.exists(), "the ended host's socket was removed");
+        assert!(!artifacts.host().exists(), "the launch record was retired");
+        assert!(sup.store.pending_scope_cleanups().await.unwrap().is_empty());
+        serving.abort();
+        assert!(serving.await.unwrap_err().is_cancelled());
+    }
+
+    /// An answering replacement is ended even when its scope sweep fails, and its record
+    /// and obligation stay until a later start confirms the sweep.
+    ///
+    /// Why: no session's terminal holds the host, so only this retry (or the Delete of a
+    /// session that reuses the ID) would end it; ending it moves the leftover to the shape
+    /// the gone-host retry already handles. Retiring
+    /// the record or the obligation on the host's end alone would drop the only evidence
+    /// that the scope may still hold the agent. Spec: with the answering host planted and
+    /// the scope manager unavailable, the retry ends the host's process and removes its
+    /// socket, and keeps the record and the obligation; a later retry with a scope that
+    /// retires on SIGTERM signals it and retires both.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn an_answering_replacement_is_ended_even_when_its_scope_sweep_fails() {
+        use crate::scope::{ScopeManager, ScopeOp};
+
+        let state = StateDir::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let generation = 1;
+        let unit = crate::scope::unit_name(&id, generation).unwrap();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), &id, generation);
+        let sup = supervisor_with_scopes(
+            &state,
+            ScopeManager::fake_reprobing(false, false, Arc::new(|_| {})),
+        )
+        .await;
+        let (socket, host) = plant_answering_replacement(&sup, &state, &id, generation).await;
+        assert!(!sup.seams.scopes.available().await);
+
+        sup.retry_pending_scope_cleanups(tokio::time::Instant::now() + Duration::from_secs(30))
+            .await;
+        assert!(!host.is_running().unwrap(), "the host was ended anyway");
+        assert!(!socket.exists());
+        assert!(
+            artifacts.host().is_file(),
+            "an unconfirmed sweep keeps the record"
+        );
+        assert_eq!(
+            sup.store.pending_scope_cleanups().await.unwrap(),
+            [(id.clone(), generation)]
+        );
+        drop(sup);
+
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&observed);
+        let sup = supervisor_with_scopes(
+            &state,
+            ScopeManager::fake_vanishing_after_signal(
+                "SIGTERM",
+                Arc::new(move |op| sink.lock().unwrap().push(op.clone())),
+            ),
+        )
+        .await;
+        sup.retry_pending_scope_cleanups(tokio::time::Instant::now() + Duration::from_secs(30))
+            .await;
+        assert!(observed.lock().unwrap().contains(&ScopeOp::Kill {
+            unit,
+            signal: "SIGTERM".into(),
+        }));
+        assert!(!artifacts.host().exists());
+        assert!(sup.store.pending_scope_cleanups().await.unwrap().is_empty());
+    }
+
+    /// A host at the recorded socket whose tag cannot be read, names another launch
+    /// generation of the session, or names another session, is left alone with the record
+    /// and the obligation.
+    ///
+    /// Why: only a host tagged for exactly the pending launch is the replacement the
+    /// obligation was left for. Anything else says nothing about whether that launch's
+    /// scope can still fill, and ending a host on the strength of its socket name alone
+    /// could end someone else's terminal. Each half of the tag match (session and
+    /// generation) has a case of its own, so dropping either fails this test. Spec: for a
+    /// stand-in host at the recorded socket carrying unreadable tag bytes, one tagged for
+    /// the same session's next generation, and one tagged for another session at the
+    /// same generation (premises: each tag decodes as the case says, and the retry's
+    /// settle connects to the host), the retry sends it no `Shutdown`, touches no scope,
+    /// and keeps the record and the obligation.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn pending_restart_cleanup_leaves_a_host_tagged_for_another_launch_alone() {
+        use super::super::host_launch::LaunchHostRecord;
+        use crate::hosts::terminal::test_host::{TestHostSpec, start_test_host};
+        use crate::scope::{ScopeManager, ScopeOp};
+
+        /// The three ways a host at the recorded socket can fail to be this launch's.
+        #[derive(Debug, Clone, Copy)]
+        enum Mismatch {
+            Unreadable,
+            OtherGeneration,
+            OtherSession,
+        }
+
+        let generation = 3;
+        for mismatch in [
+            Mismatch::Unreadable,
+            Mismatch::OtherGeneration,
+            Mismatch::OtherSession,
+        ] {
+            let state = StateDir::new();
+            let id = uuid::Uuid::new_v4().to_string();
+            let tagged = |session_id: String, generation: i64| {
+                crate::hosts::HostTag {
+                    session_id,
+                    created_ns: 1,
+                    role: crate::hosts::HostRole::Agent { generation },
+                }
+                .encode()
+                .unwrap()
+            };
+            let tag = match mismatch {
+                Mismatch::Unreadable => b"not a host tag".to_vec(),
+                Mismatch::OtherGeneration => tagged(id.clone(), generation + 1),
+                Mismatch::OtherSession => tagged(uuid::Uuid::new_v4().to_string(), generation),
+            };
+            match (mismatch, crate::hosts::HostTag::decode(&tag)) {
+                (Mismatch::Unreadable, Err(_)) => {}
+                (Mismatch::OtherGeneration, Ok(decoded)) => {
+                    assert_eq!(decoded.session_id, id);
+                    assert_ne!(decoded.role, crate::hosts::HostRole::Agent { generation });
+                }
+                (Mismatch::OtherSession, Ok(decoded)) => {
+                    assert_ne!(decoded.session_id, id);
+                    assert_eq!(decoded.role, crate::hosts::HostRole::Agent { generation });
+                }
+                (mismatch, decoded) => panic!("fixture: {mismatch:?} decoded as {decoded:?}"),
+            }
+            let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let sink = Arc::clone(&observed);
+            let sup = supervisor_with_scopes(
+                &state,
+                ScopeManager::fake_vanishing_after_signal(
+                    "SIGTERM",
+                    Arc::new(move |op| sink.lock().unwrap().push(op.clone())),
+                ),
+            )
+            .await;
+            let name = crate::hosts::free_host_name(state.path()).unwrap();
+            let stand_in = start_test_host(TestHostSpec {
+                socket: Some(name.socket_in(&crate::hosts::hosts_dir(state.path()))),
+                tag,
+                ..TestHostSpec::default()
+            });
+            let artifacts = LaunchArtifacts::for_launch(state.path(), &id, generation);
+            std::fs::write(
+                artifacts.host(),
+                LaunchHostRecord {
+                    socket: name,
+                    starter: ended_starter(),
+                }
+                .encode(),
+            )
+            .unwrap();
+            sup.store
+                .record_pending_scope_cleanup(&id, generation)
+                .await
+                .unwrap();
+            assert_eq!(stand_in.connections(), 0);
+
+            sup.retry_pending_scope_cleanups(tokio::time::Instant::now() + Duration::from_secs(30))
+                .await;
+            assert!(
+                stand_in.connections() >= 1,
+                "the retry reached the host at the recorded socket"
+            );
+            assert!(!stand_in.shutdown_seen(), "the host was not shut down");
+            {
+                // An availability probe is not a sweep; a check or a signal would be.
+                let operations = observed.lock().unwrap();
+                assert!(
+                    operations.iter().all(|op| matches!(op, ScopeOp::Probe)),
+                    "no scope was looked at or signalled: {operations:?}"
+                );
+            }
+            assert!(artifacts.host().is_file());
+            assert_eq!(
+                sup.store.pending_scope_cleanups().await.unwrap(),
+                [(id.clone(), generation)]
+            );
+            stand_in.close().await;
+        }
+    }
+
+    /// A restored session's live terminal at the recorded socket is never shut down, even
+    /// when its tag names exactly the pending launch.
+    ///
+    /// Why: the tag check cannot tell this case apart, so the held-socket guard is the
+    /// only thing protecting it. A session that reuses the deleted ID can launch at the
+    /// pending generation G (overwriting that generation's launch record with its own
+    /// host's), then have a Restart to G+1 fail definitively: its row is then at G+1,
+    /// past the skip for a row that owns the pending generation, while its terminal is
+    /// still the generation-G host tagged exactly for the pending launch. Spec: with a
+    /// row at G+1, a terminal on the map that is a real host tagged for the session's
+    /// agent at G, and G's launch record naming that host's socket (premises checked),
+    /// the retry leaves the host's process running at its socket, touches no scope, and
+    /// keeps the record and the obligation.
+    ///
+    /// A real host rather than a stand-in, because a stand-in serves one client at a time:
+    /// the retry's own connection would time out behind the runtime's, and the test would
+    /// pass with the guard removed (checked by removing it).
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn pending_restart_cleanup_leaves_a_restored_sessions_held_terminal_alone() {
+        use super::super::tests::entry_with;
+        use crate::scope::{ScopeManager, ScopeOp};
+
+        let state = StateDir::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let generation = 2;
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&observed);
+        let sup = supervisor_with_scopes(
+            &state,
+            ScopeManager::fake_vanishing_after_signal(
+                "SIGTERM",
+                Arc::new(move |op| sink.lock().unwrap().push(op.clone())),
+            ),
+        )
+        .await;
+        let (socket, host) = plant_answering_replacement(&sup, &state, &id, generation).await;
+        store_launching_row(&sup, &id, generation + 1, true, None).await;
+        let terminal = HostTerminal::adopt(
+            &socket,
+            crate::hosts::Adoption::Fresh,
+            crate::hosts::HostTerminalOptions::default(),
+        )
+        .await
+        .expect("adopt the restored session's terminal");
+        let mut entry = entry_with(Some(terminal.clone()), LastOutcome::Running);
+        entry.info.id = id.clone();
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::new(entry));
+        let artifacts = LaunchArtifacts::for_launch(state.path(), &id, generation);
+        // The restored row is past the pending generation, so only the guard can spare it.
+        assert_eq!(
+            sup.store
+                .session(&id)
+                .await
+                .unwrap()
+                .map(|row| row.generation),
+            Some(generation + 1)
+        );
+        assert!(
+            sup.held_terminals()
+                .await
+                .sockets
+                .contains(socket.file_name().unwrap()),
+            "the restored session's terminal holds the recorded socket"
+        );
+        assert!(host.is_running().unwrap());
+        assert!(sup.store.known_session_ids().await.unwrap().contains(&id));
+
+        sup.retry_pending_scope_cleanups(tokio::time::Instant::now() + Duration::from_secs(30))
+            .await;
+        assert!(host.is_running().unwrap(), "the held host was not ended");
+        assert!(socket.exists(), "the held host still serves its socket");
+        {
+            let operations = observed.lock().unwrap();
+            assert!(
+                operations.iter().all(|op| matches!(op, ScopeOp::Probe)),
+                "no scope was looked at or signalled: {operations:?}"
+            );
+        }
+        assert!(artifacts.host().is_file());
+        assert_eq!(
+            sup.store.pending_scope_cleanups().await.unwrap(),
+            [(id.clone(), generation)]
+        );
+        // The state directory's teardown ends the host itself.
+        sup.sessions.lock().await.remove(&id);
+        terminal.abort();
+    }
+
+    /// Start a real terminal host for `id`'s launch `generation` from this test binary,
+    /// and record it as that launch's host with the generation's scope cleanup pending:
+    /// what a Restart leaves when its row was deleted mid-relaunch and both the sweep of
+    /// its new agent's scope and the end of its new host failed. The host's child is a
+    /// `sleep` that the host's end hangs up. Returns the host's socket and its process,
+    /// with the premise that the host answers with that tag checked. The held-terminal
+    /// test reuses it for a restored session's own host at that generation, which leaves
+    /// the same record and obligation behind.
+    #[cfg(target_os = "linux")]
+    async fn plant_answering_replacement(
+        sup: &Supervisor,
+        state: &StateDir,
+        id: &str,
+        generation: i64,
+    ) -> (PathBuf, crate::hosts::HostProcess) {
+        use super::super::host_launch::LaunchHostRecord;
+
+        let child = crate::hosts::ChildSpec {
+            argv: vec!["/bin/sh".into(), "-c".into(), "exec sleep 600".into()],
+            cwd: state.path().to_path_buf(),
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            size: terminal_host::protocol::Size { cols: 80, rows: 24 },
+            journal_cap: crate::hosts::DEFAULT_JOURNAL_CAP,
+            initial_snapshot: None,
+        };
+        let tag = crate::hosts::HostTag {
+            session_id: id.to_string(),
+            created_ns: crate::hosts::tag::creation_stamp(),
+            role: crate::hosts::HostRole::Agent { generation },
+        };
+        let spawned = crate::hosts::spawn_host(
+            &crate::hosts::test_program::unit_test_host_program(),
+            state.path(),
+            child,
+            &tag,
+        )
+        .await
+        .expect("start the replacement's terminal host");
+        std::fs::write(
+            LaunchArtifacts::for_launch(state.path(), id, generation).host(),
+            LaunchHostRecord {
+                socket: spawned.name,
+                starter: ended_starter(),
+            }
+            .encode(),
+        )
+        .expect("write the replacement's launch record");
+        sup.store
+            .record_pending_scope_cleanup(id, generation)
+            .await
+            .expect("record the replacement's scope cleanup");
+        let host = assert_replacement_answers(&spawned.socket, id, generation).await;
+        assert!(host.is_running().unwrap());
+        (spawned.socket, host)
+    }
+
+    /// Assert that a host answers at `socket` with a tag naming `id`'s agent of launch
+    /// `generation`, and return its process. The connection ends here, which leaves the
+    /// host as it was.
+    #[cfg(target_os = "linux")]
+    async fn assert_replacement_answers(
+        socket: &Path,
+        id: &str,
+        generation: i64,
+    ) -> crate::hosts::HostProcess {
+        let mut connection = crate::hosts::HostConnection::connect(socket)
+            .await
+            .expect("the replacement host answers");
+        let info = connection
+            .info()
+            .await
+            .expect("the replacement reports itself");
+        let tag = crate::hosts::HostTag::decode(&info.tag).expect("a readable tag");
+        assert_eq!(tag.session_id, id);
+        assert_eq!(tag.role, crate::hosts::HostRole::Agent { generation });
+        connection.peer().expect("the host's process is known")
+    }
+
+    /// A first stage that can fork nothing more: this process's pid with a start time it
+    /// never had, which the starter fence reads as a process that has ended.
+    #[cfg(target_os = "linux")]
+    fn ended_starter() -> crate::hosts::HostProcess {
+        crate::hosts::HostProcess {
+            pid: std::process::id(),
+            start: 0,
         }
     }
 
