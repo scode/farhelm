@@ -71,17 +71,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
-- **Verify and guard Claude drift trust copy-back against clearing real parent-directory trust.** PR #5047
-  (`triage-drift-and-brick-tooling`) clears `hasTrustDialogAccepted` for the scratch workspace and all its ancestor
-  directories in Claude's private drift mirror (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs`)
-  so inherited trust cannot cause a vacuous pass. Landing review flagged an unverified risk: if Claude rewrites the file
-  holding those trust entries during a live drift run and `copy_back` copies that rewritten file back into the real
-  configuration (because the real file did not change during the run), the cleared parent-directory trust approvals
-  would be written back to the machine's real Claude config. Check whether `copy_back` can actually copy back the
-  stripped Claude trust file (checking `self.copied` vs `self.links` and whether current Claude rewrites it) and, if it
-  can, ensure stripped ancestor trust entries are never copied back to the real config (and add a regression test).
-  Plan: `plans/queue/claude-drift-trust-copy-back.md`.
-
 - **Decide whether Settings "Save changes before closing?" should dismiss an open custom-agent Delete confirmation (and
   align `SPEC.md`).** From PR #5075 (`custom-agent-delete-prompt`): suppose you edit a custom agent in Settings → Custom
   agents, click Delete (so the inline "Delete this custom agent?" confirmation opens in the footer without you clicking
