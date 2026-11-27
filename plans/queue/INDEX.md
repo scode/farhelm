@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `shift-cmd-v-paste-upload.md` — Add Shift-Cmd-V (Linux: Ctrl-Alt-V) to upload clipboard text via per-session attachments and paste the host path into the terminal
 - [complete] `codex-fork-and-vscode-resume.md` — Accept Codex `fork` SessionStart and `vscode` root transcript header sources in two stacked PRs so those sessions become resumable
 - [in-flight e5077d] `claude-restart-before-first-turn.md` — Restart a Claude session that saved nothing yet by starting it fresh instead of failing to resume
-- [in-flight a4ca5a] `cli-effort-reject-flag-values.md` — Drop `allow_hyphen_values` on CLI `--effort` and `--model` so omitted values fail at parse time
+- [complete] `cli-effort-reject-flag-values.md` — Drop `allow_hyphen_values` on CLI `--effort` and `--model` so omitted values fail at parse time
 - [in-flight 72c98f] `remove-legacy-sandbox-sessions-api.md` — Remove the unused legacy `POST /api/sandbox-sessions` helm endpoint and migrate its tests to `/api/environment-sessions`
 - [pending] `restart-startup-scope-cleanup.md` — Clean the scope and shut down an unheld answering replacement host during Linux supervisor startup pending-scope cleanup
 - [pending] `brick-test-inline-welcome.md` — Update macOS release brick-test instructions and unit tests for the inline Welcome view
