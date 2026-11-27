@@ -68,10 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Show "too large to copy contents" on file hover cards over the copy cap.** When a hovered terminal file path exceeds
-  the 10 MB Shift-Cmd-click copy cap, adjust the hover card hint to say "too large to copy contents" instead of omitting
-  the copy hint. Plan: `plans/queue/file-hover-too-large-hint.md`.
-
 - **Stop other free-text CLI options from swallowing following flags, and audit CLI parsing.** Give the remaining
   free-text options (`--alias`, `--title`, `--host`, etc.) the same treatment as `--model` and `--effort` (#5129) so
   omitted values do not swallow a following flag (for example, `farhelm agent host add dev --alias --tailscale`). During
