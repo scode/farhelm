@@ -24,6 +24,11 @@ specific to Claude.
   stay running. Each wrapper must pass Claude's arguments and environment through. See
   [Agent wrappers](/docs/agents/agent-wrappers/) for the requirements and how Farhelm switches back at the end of a turn
   if another Claude started inside the session reports first.
+- Claude saves a conversation only once you send it a first prompt. If you restart a Claude session before that, there
+  is nothing to resume, so Restart starts Claude afresh in the same directory instead. The same happens if the
+  conversation's file was removed later, by Claude's own cleanup for example. Farhelm checks whether the conversation
+  file Claude named exists, so a wrapper that gives Claude a different view of its home directory than the host has (a
+  separately mounted `~/.claude`, say) makes every Restart start afresh.
 - On a Linux host, Claude's own way of opening links does not reach your browser through Farhelm. Ask it to run
   `farhelm agent open-url -- <url>` instead
   ([Open links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session)).

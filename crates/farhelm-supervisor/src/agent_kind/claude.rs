@@ -68,3 +68,12 @@ pub(crate) fn session_id(stored: &str) -> Option<String> {
     (!super::is_reserved_locator_token(stored) && super::is_plausible_conversation_id(stored))
         .then(|| stored.to_owned())
 }
+
+/// The transcript file a stored Claude value names, if it is a `claude:` locator carrying one. A bare id (an older
+/// build's capture, or a report that named no usable path) has none, and Restart resumes it unchecked.
+pub(crate) fn transcript(stored: &str) -> Option<std::path::PathBuf> {
+    super::parse_locator(super::LocatorVendor::Claude, stored)
+        .ok()?
+        .session_file
+        .map(std::path::PathBuf::from)
+}

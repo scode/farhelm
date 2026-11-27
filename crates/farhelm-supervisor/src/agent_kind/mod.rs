@@ -125,7 +125,8 @@
 //!   `{farhelm_args}` expands to on start and on resume, and the legacy
 //!   [`AgentIntegration::inject_hooks`]), the exhaustive
 //!   per-kind functions below (workspace trust, ownership, locators, resume verification,
-//!   report vocabularies, stored-conversation acceptance, executable names), and one file per kind
+//!   report vocabularies, stored-conversation acceptance, the Restart start-or-resume check,
+//!   executable names), and one file per kind
 //!   (`antigravity.rs`, `claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `muse.rs`, `omp.rs`, `pi.rs`) for
 //!   that kind's own helpers: argv grammar, record and locator parsing, and
 //!   the vendor-file verification some locators need. The
@@ -2081,9 +2082,12 @@ impl IntegrationSnapshot {
     /// given whatever identity is DURABLY claimed for it, and why not when
     /// it cannot.
     ///
-    /// SPEC.md: Restart always preserves the conversation, so the only
-    /// available offer is [`RestartOffer::Resume`]. A session with no
-    /// integration has nothing to resume and offers
+    /// SPEC.md: Restart preserves the conversation, so the only available
+    /// offer is [`RestartOffer::Resume`]. (Its one exception, a Claude
+    /// session that saved nothing, still offers Resume here; Restart decides
+    /// it once the old agent has stopped, in
+    /// `Supervisor::restart_session_named`.) A session with no integration
+    /// has nothing to resume and offers
     /// [`RestartOffer::NoConversationReporting`]; any explicit resume
     /// template it carries is stored but never run. An integrated session
     /// without a usable identity offers [`RestartOffer::NotCaptured`]:
@@ -2346,6 +2350,55 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
         | AgentKind::Custom
         | AgentKind::Generic => None,
     }
+}
+
+/// The transcript a Restart of this kind checks for once the old agent has
+/// stopped, to choose between resuming and starting fresh, or `None` when
+/// Restart resumes without such a check.
+///
+/// Only Claude has one: it reports its session id as it starts but saves the
+/// conversation only once a prompt is submitted, so a Restart before that would
+/// run `claude --resume` for a conversation that does not exist. The path
+/// returned is judged by [`conversation_saved`]: when it says nothing was
+/// saved, Restart runs the session's start command instead (SPEC.md, Restart).
+/// A kind added here takes that same existence rule. Unlike
+/// [`verifies_resume_target`] this never refuses a Restart and never rewrites
+/// the capture; it only picks the command. A bare id (no transcript recorded)
+/// skips the check.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub fn unsaved_conversation_check(
+    kind: AgentKind,
+    captured: Option<&str>,
+) -> Option<std::path::PathBuf> {
+    match kind {
+        AgentKind::Claude => claude::transcript(captured?),
+        AgentKind::Codex
+        | AgentKind::Goose
+        | AgentKind::Pi
+        | AgentKind::Omp
+        | AgentKind::Grok
+        | AgentKind::Antigravity
+        | AgentKind::Muse
+        | AgentKind::Custom
+        | AgentKind::Generic => None,
+    }
+}
+
+/// Whether the agent has saved the conversation whose file is `path`, as
+/// [`unsaved_conversation_check`] uses it: `false` only when nothing exists
+/// there.
+///
+/// Claude writes the transcript once the first prompt is submitted, before
+/// the first turn completes, so a missing file means there is nothing
+/// `claude --resume` could reopen. A regular file resumes. Any other answer
+/// (a permission error, a directory or a symlink where the file should be)
+/// also resumes, as Restart did before this check existed: the check picks
+/// between two commands and must never be the reason a Restart that worked
+/// before now starts over. Only existence is checked; the file is never read
+/// or parsed. Opened without following a symlink and without blocking on a
+/// FIFO (`records::open_regular_file`).
+pub async fn conversation_saved(path: &Path) -> bool {
+    !matches!(records::open_regular_file(path).await, Ok(None))
 }
 
 /// Whether a Resume restart of this kind verifies its captured target on
