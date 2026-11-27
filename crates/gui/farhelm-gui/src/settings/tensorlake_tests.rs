@@ -161,7 +161,7 @@ fn the_warning_heads_the_section_and_a_failed_read_locks_it_until_a_retry(cx: &m
     for control in ["tensorlake-key-test", "tensorlake-key-clear", ASK_ID] {
         assert_eq!(available(cx, control), Some(false), "{control} is locked");
     }
-    assert!(!drawn(cx, "settings-footer-save"));
+    assert!(!drawn(cx, super::tests::TENSORLAKE_SAVE));
 
     press(cx, "tensorlake-key-retry");
     let reads = sent(&mut helm);
@@ -229,7 +229,7 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
     settle(cx);
     assert!(painted(cx).contains("No key saved"));
     fill(cx, "tensorlake-key", "fictional-key-saved-there");
-    click(cx, "settings-footer-save");
+    click(cx, super::tests::CREDENTIALS_SAVE);
     let (id, body) = one_account_save(&mut helm);
     assert_eq!(body, json!({ "api_key": "fictional-key-saved-there" }));
     helm.reply(id, 200, Some(account(true, false)));
@@ -269,7 +269,7 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
         "fictional-key-typed-here",
         "the other form's draft is its own"
     );
-    click(cx, "settings-footer-discard");
+    click(cx, super::tests::TENSORLAKE_DISCARD);
     assert!(
         sent(&mut helm).is_empty(),
         "Discard does not clear the saved key"
@@ -279,7 +279,7 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
     assert_eq!(typed_in_credentials(cx), "fictional-credentials-draft");
 
     fill(cx, "tensorlake-key", "fictional-key-typed-here");
-    click(cx, "settings-footer-save");
+    click(cx, super::tests::TENSORLAKE_SAVE);
     let (_, body) = one_account_save(&mut helm);
     assert_eq!(body, json!({ "api_key": "fictional-key-typed-here" }));
 }
@@ -316,7 +316,7 @@ fn assert_closing_with_two_different_key_drafts(cx: &mut TestAppContext, saving_
     show_section(cx, Section::Tensorlake);
     assert_eq!(typed_here(cx), "fictional-first-key");
     let pending = saving_first.then(|| {
-        click(cx, "settings-footer-save");
+        click(cx, super::tests::TENSORLAKE_SAVE);
         let (id, body) = one_account_save(&mut helm);
         assert_eq!(body, json!({ "api_key": "fictional-first-key" }));
         assert_eq!(preference_work(cx), Some(Work::Save));

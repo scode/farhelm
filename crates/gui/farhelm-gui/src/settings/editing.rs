@@ -32,6 +32,7 @@ use super::{
 };
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::{self, Mark};
+use crate::host_text::HostSentence;
 use crate::layers::{self, Dismissal};
 use crate::operations::{OpKey, Outcome};
 use crate::prompt::{self, Answer, Question};
@@ -186,7 +187,7 @@ enum Edit {
 
 /// What one Save or Discard authorized. Keep identities independent of values so closing a question does not keep
 /// a detached editor alive.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct ApprovedEdit {
     id: EntityId,
     version: EditVersion,
@@ -390,6 +391,14 @@ impl Edit {
     }
 }
 
+/// What the page footer's Save and Discard offered when they were drawn: the page, and the version of each of its
+/// drafts then ([`SettingsDialog::page_answers`]).
+#[derive(Clone, PartialEq)]
+pub(super) struct PageAction {
+    section: Section,
+    approved: Vec<ApprovedEdit>,
+}
+
 /// One Save press, scoped to a page or to closing Settings: the approved drafts still to send, one at a time. SPEC.md,
 /// "Settings": the helm is a presumed low-latency remote, so the loop simply waits for each save before sending the
 /// next, and a close waits for the whole loop. There is no follow-up batch and no watch over saves already out; a
@@ -524,10 +533,26 @@ impl SettingsDialog {
             .map(|edit| edit.name())
     }
 
-    /// Drafts can be discarded without sending a command. A save in flight still belongs to the form that sent it.
-    pub(super) fn discard_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Discard what the footer `action` offered: the dirty forms of its page whose drafts are still the versions it
+    /// showed. Nothing when another page is shown now. A save in flight still belongs to the form that sent it, and a
+    /// draft edited since the footer was shown stays for a fresh action.
+    pub(super) fn discard_page(
+        &mut self,
+        action: &PageAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action.section != self.shown {
+            return;
+        }
         for edit in self.edits(cx) {
-            if edit.is_form() && edit.section() == self.shown && edit.state(cx) == EditState::Dirty
+            if edit.is_form()
+                && edit.section() == self.shown
+                && edit.state(cx) == EditState::Dirty
+                && action
+                    .approved
+                    .iter()
+                    .any(|approval| approval.permits(&edit, cx))
             {
                 edit.discard(window, cx);
             }
@@ -536,57 +561,85 @@ impl SettingsDialog {
         cx.notify();
     }
 
-    pub(super) fn save_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let approved = self
-            .edits(cx)
-            .iter()
-            .filter(|edit| edit.is_form() && edit.section() == self.shown)
-            .map(|edit| edit.approval(cx))
-            .collect();
-        self.start_loop(approved, false, window, cx);
+    /// Save what the footer `action` offered, through the save loop, whose approval check skips a draft edited since
+    /// the footer was shown. Nothing when another page is shown now.
+    pub(super) fn save_page(
+        &mut self,
+        action: &PageAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action.section == self.shown {
+            self.start_loop(action.approved.clone(), false, window, cx);
+        }
     }
 
     /// The current page has only one Save even when it holds several fields, as Checkouts does. Its identity
     /// survives the first field settling so keyboard focus stays on Save until the loop ends.
-    pub(super) fn page_answers(&self, cx: &Context<Self>) -> Option<(&'static str, Vec<Button>)> {
+    ///
+    /// The buttons act only on what they were shown offering (SPEC.md, "One GUI at a time"): each press carries the
+    /// page and the draft versions captured for this footer ([`PageAction`]), used only once the window has presented
+    /// it ([`prompt::ActionFrame`]), and the buttons' element ids name the page, so a pointer press held across a page
+    /// change cannot finish as a click on the next page's Save. With nothing to offer, the snapshot is cleared.
+    pub(super) fn page_answers(
+        &mut self,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> Option<(&'static str, Vec<Button>)> {
         let edits: Vec<_> = self
             .edits(cx)
             .into_iter()
             .filter(|edit| edit.is_form() && edit.section() == self.shown)
             .collect();
-        let name = edits.first()?.name();
+        let Some(name) = edits.first().map(Edit::name) else {
+            self.page_frame.clear();
+            return None;
+        };
         let saving = edits.iter().any(|edit| edit.state(cx) == EditState::Saving);
+        let busy =
+            self.save_loop.is_some() || saving || edits.iter().any(|edit| edit.holds_save(cx));
+        let shown = PageAction {
+            section: self.shown.clone(),
+            approved: edits.iter().map(|edit| edit.approval(cx)).collect(),
+        };
+        let action = self.page_frame.capture(shown, (!saving, busy), window);
+        let key = self.shown.key();
         let mut answers = Vec::new();
         if !saving {
-            let dialog = cx.weak_entity();
+            let (dialog, action) = (cx.weak_entity(), action.clone());
             answers.push(
                 Button::new(
-                    "settings-footer-discard",
+                    format!("settings-footer-discard-{key}"),
                     "Discard",
                     HoverHelp::tooltip("Restore the saved values on this page"),
                     gpui::Role::Button,
                 )
                 .tier(Tier::Ghost)
                 .on_click(move |_, window, cx| {
-                    let _ = dialog.update(cx, |dialog, cx| dialog.discard_page(window, cx));
+                    let Some(action) = action.shown().cloned() else {
+                        return;
+                    };
+                    let _ =
+                        dialog.update(cx, |dialog, cx| dialog.discard_page(&action, window, cx));
                 }),
             );
         }
         let dialog = cx.weak_entity();
         answers.push(
             Button::new(
-                "settings-footer-save",
+                format!("settings-footer-save-{key}"),
                 if saving { "Saving…" } else { "Save" },
                 HoverHelp::tooltip("Save the changes on this page"),
                 gpui::Role::Button,
             )
             .accessible_name("Save")
             .tier(Tier::Primary)
-            .busy(
-                self.save_loop.is_some() || saving || edits.iter().any(|edit| edit.holds_save(cx)),
-            )
+            .busy(busy)
             .on_click(move |_, window, cx| {
-                let _ = dialog.update(cx, |dialog, cx| dialog.save_page(window, cx));
+                let Some(action) = action.shown().cloned() else {
+                    return;
+                };
+                let _ = dialog.update(cx, |dialog, cx| dialog.save_page(&action, window, cx));
             }),
         );
         Some((name, answers))
@@ -858,14 +911,34 @@ impl SettingsDialog {
         if edits.is_empty() {
             return Dismissal::Close;
         }
-        let mut names = Vec::new();
+        // One line names every affected form: each custom agent draft on its own, by the name the person knows it by
+        // (a host value, so a sentence part of its own), and every other kind of form once.
+        let mut unsaved = HostSentence::new("settings-close-unsaved").text("Unsaved: ");
+        let mut named: Vec<&'static str> = Vec::new();
+        let mut parts = 0;
         for edit in &edits {
-            if !names.contains(&edit.name()) {
-                names.push(edit.name());
+            if !matches!(edit, Edit::CustomAgent(..)) {
+                if named.contains(&edit.name()) {
+                    continue;
+                }
+                named.push(edit.name());
             }
+            if parts > 0 {
+                unsaved = unsaved.text(", ");
+            }
+            parts += 1;
+            unsaved = match edit {
+                Edit::CustomAgent(Section::CustomAgent(id), view) => {
+                    unsaved.host(&custom_agents::close_name(id, view.read(cx), cx))
+                }
+                Edit::CustomAgent(..) => unsaved.text("Add custom agent"),
+                _ => unsaved.text(edit.name()),
+            };
         }
-        if names.len() == 1 {
-            self.reveal_save_failure(edits[0].section(), window, cx);
+        // Show the affected page only when there is one; with several, stay where the person is.
+        let section = edits[0].section();
+        if edits.iter().all(|edit| edit.section() == section) {
+            self.reveal_save_failure(section, window, cx);
         }
         let approved: Vec<_> = edits.iter().map(|edit| edit.approval(cx)).collect();
         let discard = cx.weak_entity();
@@ -878,7 +951,7 @@ impl SettingsDialog {
             ),
             approved,
         )
-        .line(format!("Unsaved: {}", names.join(", ")))
+        .line(unsaved)
         .cancel_answer(Answer::new(
             "Keep editing",
             HoverHelp::tooltip("Stay in Settings with this draft"),

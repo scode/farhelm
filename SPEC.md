@@ -2740,13 +2740,14 @@ with unsaved changes. The recipe and credential editors place their own actions 
 Save writes the changed folder and command in order. Closing, from Escape or either Close control, first waits for a
 save, Test, Clear or Delete still out, a switch's save included; recipe builds and deletes, leftover cleanup and Create
 SSH key carry on by themselves and do not hold it. A refusal among them keeps Settings open on its page, and any input
-in the meantime cancels that close. Then, with unsaved changes, closing asks once with the affected forms named and
-offers **Keep editing**, **Discard** and **Save**. A close that saves sends the saves one at a time. The first failure
-keeps Settings open and shows the affected page with its error. A credential replacement that missed hosts while
-Settings was closing keeps it open on the Credentials overview, where those hosts are listed. Two different unsaved
-Tensorlake keys leave Settings open on Credentials with a message to save the desired key first. When Settings closes,
-focus returns to the control that opened it if it is still available, such as the gear or the Settings button in a hook
-hint.
+in the meantime cancels that close. Then, with unsaved changes, closing asks once with the affected forms named, each
+custom agent draft by its own name, and offers **Keep editing**, **Discard** and **Save**. When the affected forms are
+on one page, that page is shown behind the question; otherwise the shown page stays. A close that saves sends the saves
+one at a time. The first failure keeps Settings open and shows the affected page with its error. A credential
+replacement that missed hosts while Settings was closing keeps it open on the Credentials overview, where those hosts
+are listed. Two different unsaved Tensorlake keys leave Settings open on Credentials with a message to save the desired
+key first. When Settings closes, focus returns to the control that opened it if it is still available, such as the gear
+or the Settings button in a hook hint.
 
 The close answers apply to the drafts listed when the question opened. A page Save also applies only to the drafts it
 started with. New or changed drafts stay in Settings for a fresh action. If a dialog or menu opened from Settings still
