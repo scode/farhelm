@@ -22,8 +22,8 @@ use gpui::{
 
 use super::{Chord, KeyboardShortcuts, Keys, Name, Row, sections, wording};
 use crate::actions::{
-    self, BeginSequence, CONTEXT, DecreaseTerminalTextSize, DeleteSession,
-    IncreaseTerminalTextSize, KeyOwner, NewSession, NextTerminalTab, PHYSICAL_KEYS,
+    self, BeginSequence, CONTEXT, CloseTerminalTab, DecreaseTerminalTextSize, DeleteSession,
+    IncreaseTerminalTextSize, KeyOwner, NewSession, NewTerminalTab, NextTerminalTab, PHYSICAL_KEYS,
     PasteViaFileUpload, PreviousTerminalTab, QuickLaunch, QuickSwitcher, RenameSession,
     ShowKeyboardShortcuts, TERMINAL_CONTEXT, TERMINAL_KEYS, THIS_PLATFORM, TemplateList,
     TemplateNumberKey,
@@ -133,7 +133,9 @@ fn owned(rows: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
 /// overview's rows and spellings are the spec for the rest (`keyboard_shortcuts.rs` and its browser test at reference
 /// commit `24bc0580`). Specified, with nothing marked and no number key assigned: Linux's table row for row in
 /// Ctrl+Shift forms (Delete on Backspace, text size on − and +, no New), and the Mac's the same rows in Command forms
-/// with New first under Sessions and Command+Shift for text size. The Terminal group ends with Paste via file upload
+/// with New first under Sessions and Command+Shift for text size. The Terminal group opens with New and Close terminal
+/// tab, whose Mac chord is Delete session's Cmd+W (one chord, which closes the shown shell tab or deletes from the main
+/// terminal) and whose Linux chord is Ctrl+Shift+W. It ends with Paste via file upload
 /// (SPEC.md, "Attachments"), the one chord that differs in more than its modifier family: Ctrl+Alt+V on Linux, whose
 /// Ctrl+Shift+V is Paste, and Command+Shift+V on a Mac.
 #[test]
@@ -178,6 +180,8 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
         ),
         ("Launching", "In a sequence: launch", "Enter"),
         ("Launching", "In a sequence: cancel", "Escape"),
+        ("Terminal", "New terminal tab", "Ctrl+Shift+T"),
+        ("Terminal", "Close terminal tab", "Ctrl+Shift+W"),
         ("Terminal", "Smaller terminal text", "Ctrl+Shift+−"),
         ("Terminal", "Larger terminal text", "Ctrl+Shift++"),
         ("Terminal", "Previous terminal tab", "Ctrl+Shift+["),
@@ -207,6 +211,8 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
         ("Launching", "In a sequence: add the ⚡ template", "⌘P"),
         ("Launching", "In a sequence: launch", "Enter"),
         ("Launching", "In a sequence: cancel", "Escape"),
+        ("Terminal", "New terminal tab", "⌘T"),
+        ("Terminal", "Close terminal tab", "⌘W"),
         ("Terminal", "Smaller terminal text", "⌘+Shift+−"),
         ("Terminal", "Larger terminal text", "⌘+Shift++"),
         ("Terminal", "Previous terminal tab", "⌘+Shift+["),
@@ -268,11 +274,19 @@ enum Runs {
     NumberKeys,
 }
 
-/// What the row naming `name` runs. Panics on a row this test has no answer for, so a new row cannot slip past it.
-fn runs(name: &Name) -> Runs {
+/// What the row naming `name` runs on `platform`. Panics on a row this test has no answer for, so a new row cannot slip
+/// past it.
+fn runs(platform: Platform, name: &Name) -> Runs {
     let action = |action: &dyn Action| Runs::Action(action.boxed_clone());
     match name {
         Name::Words("New session") => action(&NewSession),
+        Name::Words("New terminal tab") => action(&NewTerminalTab),
+        // A Mac closes the shown shell tab with Delete's own chord, Cmd+W, which Delete's action handles by closing the
+        // tab when one is shown (`main_view`'s `delete_or_close_tab`); Linux has a chord and an action of its own.
+        Name::Words("Close terminal tab") => match platform {
+            Platform::Mac => action(&DeleteSession),
+            Platform::Linux => action(&CloseTerminalTab),
+        },
         Name::Words("Quick switcher") => action(&QuickSwitcher),
         Name::Words("Delete session") => action(&DeleteSession),
         Name::Words("Rename session") => action(&RenameSession),
@@ -393,16 +407,20 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
                         "{what} on {platform:?}: its row's chord here is not bound to {}",
                         action.name()
                     ),
-                    // A Mac-only shortcut (New), whose binding the keymap builds through a function the tests can call.
+                    // A shortcut of the other platform alone (New, the Mac's; Close terminal tab, Linux's), whose
+                    // binding the keymap builds through a function the tests can call.
                     None => {
-                        let binding = actions::new_session_binding();
+                        let binding = match platform {
+                            Platform::Mac => actions::new_session_binding(),
+                            Platform::Linux => actions::close_terminal_tab_binding(),
+                        };
                         assert_eq!(binding.action().name(), action.name(), "{what}");
                         assert!(
                             binding
                                 .keystrokes()
                                 .first()
                                 .is_some_and(|bound| typed.should_match(bound)),
-                            "{what} on {platform:?}: New's binding has another chord"
+                            "{what} on {platform:?}: its binding has another chord"
                         );
                     }
                 }
@@ -473,7 +491,8 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
 /// the action its row names. A shortcut matched by position agrees with its physical-key row (key and exact
 /// modifiers). Any other shortcut is bound to its action by this platform's installed keymap in Farhelm's context, and,
 /// for the other platform, its chord is that action's app-shortcut row in the terminal key table (New, the Mac's alone,
-/// through its binding function). Paste via file upload, which only a focused terminal answers, is checked against the
+/// and Close terminal tab, Linux's alone, through their binding functions; Close terminal tab's Mac chord is Delete
+/// session's Cmd+W). Paste via file upload, which only a focused terminal answers, is checked against the
 /// terminal's own row of the terminal key table on both platforms, and this platform's keymap must run it with a
 /// terminal focused. Quick launch is checked as bound to its action alone and inside a sequence.
 /// The menu hints on this platform must spell the same chords as the dialog rows.
@@ -495,7 +514,7 @@ fn every_chord_the_table_shows_runs_the_action_its_row_names(cx: &mut TestAppCon
                     if let Keys::Chord(chord) = row.keys {
                         chords += 1;
                         let what = format!("{:?}", row.name);
-                        check_chord(platform, chord, runs(&row.name), &what, cx);
+                        check_chord(platform, chord, runs(platform, &row.name), &what, cx);
                         if platform == THIS_PLATFORM {
                             let hint = match row.name {
                                 Name::Words("Delete session") => {
@@ -503,6 +522,9 @@ fn every_chord_the_table_shows_runs_the_action_its_row_names(cx: &mut TestAppCon
                                 }
                                 Name::Words("Rename session") => {
                                     Some(actions::RENAME_SESSION_SHORTCUT_NAME)
+                                }
+                                Name::Words("New terminal tab") => {
+                                    Some(actions::NEW_TERMINAL_TAB_SHORTCUT_NAME)
                                 }
                                 Name::Words("Keyboard shortcuts") => {
                                     Some(actions::KEYBOARD_SHORTCUTS_SHORTCUT_NAME)

@@ -29,7 +29,8 @@ The directory shows your home directory as `~`.
 The terminal tabs and action buttons share the row above the terminal. The buttons at its right end stop, restart, replace,
 clone, and delete the session; the arrows beside **Restart** and **Replace** open menus that also offer **Restart
 with…** and **Replace with…**. [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers them. **Cmd+W** on a
-Mac, or **Ctrl+Shift+Backspace** on Linux, does the same as the open session's Delete button. In the Mac app, Cmd+W does not close the window; use its close
+Mac, or **Ctrl+Shift+Backspace** on Linux, does the same as the open session's Delete button; on a Mac that holds while
+you're viewing the main terminal, and on a shell tab Cmd+W closes the tab instead. In the Mac app, Cmd+W does not close the window; use its close
 button or Cmd+Q.
 
 ## Open a shell beside the agent
@@ -42,11 +43,12 @@ button or Cmd+Q.
 Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
 session's directory. In a [container session](/docs/agents/containerized-sessions/), it opens inside the session's
 container. It belongs to the session: it keeps running when you switch to another session or restart the agent.
-You can switch between them with the [terminal tab shortcuts](/docs/using/keyboard-shortcuts/#terminal).
+**Cmd+T** on a Mac, or **Ctrl+Shift+T** on Linux, opens a new one, and **Cmd+W** or **Ctrl+Shift+W** closes the one
+you're viewing. You can switch between them with the [terminal tab shortcuts](/docs/using/keyboard-shortcuts/#terminal).
 When the tab you're viewing closes, Farhelm shows the nearest open tab to its left, or the session's main terminal if
 there is none. Farhelm remembers what you were viewing when you switch sessions. If that tab closes while you're away,
 the session opens on its main terminal.
-Stopping or deleting the session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
+Stopping or deleting the session closes it, and deleting a session with shell tabs open always asks first. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **Cancel** to keep it open. You can skip that question with
 [Skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **Sessions** in settings.
 

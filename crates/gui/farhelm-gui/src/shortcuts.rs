@@ -171,6 +171,8 @@ struct Section {
 /// Mac app only (SPEC.md: "the Linux app has no such shortcut"; decided for the overview by the migration's
 /// orchestrator on 2026-11-13); Delete is Cmd+W on a Mac and Ctrl+Shift+Backspace on Linux, the one shortcut whose key
 /// differs; and terminal text size takes Shift on a Mac too, where unshifted Command was the old web page's own zoom.
+/// Close terminal tab shows Cmd+W on a Mac too, the same chord as Delete session, since there one chord does both
+/// (whichever applies to the shown terminal), and Ctrl+Shift+W on Linux.
 /// Paste via file upload is not an app shortcut but the terminal's own, the one terminal key listed (SPEC.md,
 /// "Attachments"): Command+Shift+V on a Mac and Ctrl+Alt+V on Linux, whose Ctrl+Shift+V is ordinary Paste.
 ///
@@ -260,7 +262,11 @@ fn sections(platform: Platform, bindings: &Bindings) -> Vec<Section> {
         alt: !mac,
         key: "V",
     });
+    // Close terminal tab shares the Mac's Cmd+W with Delete session: on a Mac the chord closes the shown shell tab and
+    // deletes only from the main terminal (SPEC.md, "Session view"); Linux closes with Ctrl+Shift+W of its own.
     let terminal = vec![
+        words("New terminal tab", app("T")),
+        words("Close terminal tab", app("W")),
         words("Smaller terminal text", shifted_terminal("−")),
         words("Larger terminal text", shifted_terminal("+")),
         words("Previous terminal tab", shifted_terminal("[")),

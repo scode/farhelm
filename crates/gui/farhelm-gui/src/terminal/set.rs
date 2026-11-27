@@ -63,7 +63,7 @@
 //! The close question names the tab as it was named when it opened (the old one renamed itself as tabs before it
 //! closed). It acts on the tab's id either way.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -478,6 +478,12 @@ pub struct TerminalSet {
     /// needs no bookkeeping here. Only the last one matters, since a press on another tab's × closes the open question
     /// before it asks its own. The session header keeps its questions the same way (`session_pane::header`'s `asked`).
     asking: Option<(String, LayerId)>,
+    /// Each listed shell tab's × anchor, by tab id, as the strip last drew it: the close shortcut asks its question
+    /// under the shown tab's × as the × itself does ([`TerminalSet::close_shown`]), and an [`Anchor`] is made only while
+    /// the strip draws (it is element state), so the strip keeps them here. A `RefCell` because the strip is built from a
+    /// shared reference while the header draws, as `revealed` is. Replaced whole at every draw, so a tab no longer listed
+    /// drops out.
+    close_anchors: RefCell<HashMap<String, Anchor>>,
     /// A tab New terminal opened that the pushed row does not list yet, with the press that asked and its window: it is
     /// chosen once it is listed if the user waited.
     opened: Option<(String, Mark, AnyWindowHandle)>,
@@ -523,6 +529,7 @@ impl TerminalSet {
             strip_bounds: ScrollHandle::new(),
             inert: false,
             asking: None,
+            close_anchors: RefCell::new(HashMap::new()),
             opened: None,
             _tabs_follow: tabs_follow,
             _carried: carried,
@@ -959,6 +966,7 @@ impl TerminalSet {
         let inert = this.inert;
         let asking = this.asking.clone();
         this.reveal_focused(window);
+        let mut close_anchors = HashMap::new();
         let listed: Vec<(String, FocusHandle, FocusHandle)> = this
             .tabs
             .iter()
@@ -1037,6 +1045,7 @@ impl TerminalSet {
                 window,
                 cx,
             );
+            close_anchors.insert(id.clone(), anchor.clone());
             let hover = TabHover::of(&id, window, cx);
             // An inert strip takes no presses, so the pointer over it reveals nothing; a question or a close already
             // under way still shows whose it is.
@@ -1119,6 +1128,7 @@ impl TerminalSet {
                     .into_any_element(),
             );
         }
+        set.read(cx).close_anchors.replace(close_anchors);
         // `.tab-add-divider`: a 1-pixel rule that keeps creating a tab apart from choosing one.
         let divider = div()
             .flex_none()
@@ -1138,8 +1148,11 @@ impl TerminalSet {
                 ADD_ID,
                 Icon::Add,
                 "New terminal",
-                HoverHelp::tooltip("New terminal: open a shell tab in the session's folder")
-                    .below(),
+                HoverHelp::tooltip(format!(
+                    "New terminal: open a shell tab in the session's folder ({})",
+                    crate::actions::NEW_TERMINAL_TAB_SHORTCUT_NAME
+                ))
+                .below(),
                 Role::Button,
             )
             .tier(Tier::Neutral)
@@ -1341,6 +1354,55 @@ impl TerminalSet {
         if let Err(not_started) = started {
             tracing::debug!(?not_started, "New terminal sent nothing");
         }
+    }
+
+    /// New terminal from its shortcut (SPEC.md, "Session view": Cmd+T on a Mac, Ctrl+Shift+T on Linux): the press on
+    /// New terminal, with that button's availability. Nothing happens while the set is inert (a card covers it) or
+    /// while a request on the session's own key is in flight (the button is disabled then); the main view has already
+    /// refused while a dialog or menu holds the keyboard or the terminal composes, the button's other refusal. Silent
+    /// either way, as SPEC.md asks: a disabled button says why on hover, a chord has nowhere to say it.
+    pub(crate) fn open_from_shortcut(set: &Entity<TerminalSet>, window: &Window, cx: &mut App) {
+        let this = set.read(cx);
+        if this.inert || crate::session_list::delete::busy(&this.key, cx) {
+            return;
+        }
+        let mark = Mark::take(cx);
+        TerminalSet::open_tab(set, mark, window.window_handle(), cx);
+    }
+
+    /// Close the shown shell tab from a shortcut (SPEC.md, "Session view": Ctrl+Shift+W on Linux, Cmd+W on a Mac), as
+    /// a press on its × does: asking under the ×, unless session confirmations are skipped. Returns whether a shell tab
+    /// is shown, which is what the Mac's Cmd+W needs to know: with a shell tab shown it closes that tab or does nothing,
+    /// and only on the main terminal (or an inert strip, where no tab can be pressed) does it fall back to deleting the
+    /// session. So a press while that tab's close is already in flight, or already confirmed, does nothing rather than
+    /// deleting the session behind it.
+    ///
+    /// The tab is scrolled into view first ([`Self::reveal_close`]) so that its question hangs from a × on screen: the
+    /// anchor is the one the strip last drew, and its bounds follow the strip once it is laid out at its new offset, so
+    /// the layer manager places the question under the revealed ×.
+    pub(crate) fn close_shown(
+        set: &Entity<TerminalSet>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let this = set.read(cx);
+        let Some(id) = this.chosen.clone().filter(|_| !this.inert) else {
+            return false;
+        };
+        let Some(index) = this.tabs.iter().position(|tab| tab.id == id) else {
+            return false;
+        };
+        if this.confirmed_closed.contains(&id) || closing(&this.key, &id, cx) {
+            return true;
+        }
+        let Some(anchor) = this.close_anchors.borrow().get(&id).cloned() else {
+            // Not drawn yet: there is nothing to hang a question from. The next press finds it.
+            return true;
+        };
+        // Item 0 is the Agent tab; shell tab `index` is item `index + 1` ([`StripControl`]).
+        this.reveal_close(index + 1);
+        ask_to_close(set, &id, &tab_label(index), &anchor, window, cx);
+        true
     }
 
     /// Close shell tab `id` (its × and, unless skipped, its question), under the tab's own key, so siblings close side by

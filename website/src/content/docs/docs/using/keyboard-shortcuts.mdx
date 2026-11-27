@@ -27,9 +27,10 @@ session, and Delete uses Backspace there.
 | [Quick switcher](/docs/using/session-list/#jump-with-the-keyboard) | Cmd+K | Ctrl+Shift+K |
 | Keyboard shortcuts | Cmd+/ | Ctrl+Shift+/ |
 
-Delete uses the same confirmation as the session's Delete button. On a Mac, Cmd+W deletes the session; the window's
-close button or Cmd+Q closes the app. On Linux, Ctrl+Shift+Backspace in a text field other than the terminal does not
-delete the session.
+Delete uses the same confirmation as the session's Delete button, and always asks first while the session has shell
+tabs open. On a Mac, Cmd+W deletes the session only while you're viewing its main terminal: on a shell tab it closes that
+tab instead (see [Terminal](#terminal)). The window's close button or Cmd+Q closes the app. On Linux,
+Ctrl+Shift+Backspace in a text field other than the terminal does not delete the session.
 
 ## Launching
 
@@ -83,15 +84,21 @@ In [Settings](/docs/using/settings/), Cmd+F on a Mac, or Ctrl+F on Linux outside
 
 ## Terminal
 
-Use these shortcuts to change text size or switch tabs in [an open session](/docs/using/work-in-a-session/#open-a-shell-beside-the-agent).
+Use these shortcuts to open, close or switch tabs, or change text size, in [an open session](/docs/using/work-in-a-session/#open-a-shell-beside-the-agent).
 They work even when focus is elsewhere in the main window. An open dialog keeps focus.
 
 | Action | Mac | Linux |
 | --- | --- | --- |
+| New terminal tab | Cmd+T | Ctrl+Shift+T |
+| Close the shell tab you're viewing | Cmd+W | Ctrl+Shift+W |
 | Larger terminal text | Cmd+Shift+Equal | Ctrl+Shift+Equal |
 | Smaller terminal text | Cmd+Shift+Minus | Ctrl+Shift+Minus |
 | Previous terminal tab | `Cmd+Shift+[` | `Ctrl+Shift+[` |
 | Next terminal tab | `Cmd+Shift+]` | `Ctrl+Shift+]` |
+
+Closing a tab with its shortcut asks first, as its close button does, unless
+[Skip session confirmations](/docs/using/settings/#sessions) is on. On the main terminal, Ctrl+Shift+W does nothing, and
+a Mac's Cmd+W deletes the session instead.
 
 Use the keys in the Equal, Minus, and bracket positions on a US keyboard. Switching tabs wraps from the last shell
 tab to the main terminal and back.

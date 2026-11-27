@@ -2568,6 +2568,17 @@ button into view. They have no effect with only the main terminal, with no usabl
 the terminal, while a dialog or menu holds the keyboard, or while the focused terminal has marked text from an input
 method. The chords are consumed before they can reach a terminal program or text field.
 
+`Cmd+T` on macOS, `Ctrl+Shift+T` on Linux, opens a new shell tab as New terminal does, from anywhere in the main window,
+the terminal included, and its tooltip names the chord. Closing the shown shell tab is `Cmd+W` on macOS and
+`Ctrl+Shift+W` on Linux: it closes that tab as its close button does, asking first under the tab's close button
+(scrolled into view if needed) unless session confirmations are skipped. With the main terminal shown, `Ctrl+Shift+W`
+does nothing and `Cmd+W` deletes the session instead (see Desktop window chrome); with a shell tab shown whose close is
+already in flight, `Cmd+W` does nothing. These chords act once per press, never reach a terminal program, and do nothing
+with no session open, while a card covers the terminal (where the Mac's `Cmd+W` deletes, as on the main terminal), while
+a dialog or menu holds the keyboard, or while the focused terminal has marked text from an input method; the new-tab
+chord also does nothing while a request on the session is pending, as New terminal does, and the close chord is refused
+only where the tab's close button is disabled (an inert strip or a close already in flight).
+
 For as long as the app runs, the session view remembers your selection in each session, including the choice after a tab
 closes. It shows the main terminal if you chose it or if the remembered tab is gone or unavailable to attach. The main
 tab is **Shell** when the session is known to run Bash or Zsh, and **Agent** otherwise. The main terminal is available
@@ -4211,9 +4222,11 @@ Cmd+N in the Mac desktop app opens New with the same prefill, even from a focuse
 New is disabled. New's hover text names the shortcut in the Mac desktop app only; the Linux app has no such shortcut.
 
 Cmd+W in the Mac desktop app, or Ctrl+Shift+Backspace on Linux, invokes the open session's header Delete action with its
-ordinary confirmation and busy rules. With no session open it does nothing. The Mac app's Window menu has no Close
-Window item, leaving Cmd+W to session deletion; the window close button and Cmd+Q still close the app. The Linux chord
-leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.
+ordinary confirmation and busy rules. In the Mac app this holds while the session's main terminal is shown; with a shell
+tab shown, Cmd+W closes that tab instead (see Session view). With no session open it does nothing. The Mac app's Window
+menu has no Close Window item, leaving Cmd+W to the session (Delete, or closing the shown shell tab); the window close
+button and Cmd+Q still close the app. The Linux chord leaves text editors other than the terminal alone. A visible modal
+keeps keyboard ownership.
 
 On macOS and Linux, text fields use Ctrl+F and Ctrl+B to move forward and back by a character, Ctrl+N and Ctrl+P to move
 down and up, Ctrl+A and Ctrl+E to move to the start and end of the line, Ctrl+D and Ctrl+H to delete forward and back,
