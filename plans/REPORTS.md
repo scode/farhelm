@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`agent-catalog-cli-and-drift-cleanups`](reports/agent-catalog-cli-and-drift-cleanups.report.md) landed 2026-11-25 in #4945, #4951, #4954, #4956, #4959: Remove GPT-5.6 from the model catalog, allow Goose named Restart capture, accept leading-hyphen `--effort`, and clean up OpenCode and instructions drift checks
 - [`tailscale-private-socket-dirs`](reports/tailscale-private-socket-dirs.report.md) landed 2026-11-25 in #4957, #4962: Allocate private OS-chosen Tailscale SSH socket directories persisted across helm restarts and retire host masters on retarget and Remove without globbing `/tmp`
 - [`tensorlake-setup-and-repo-cache-fixes`](reports/tensorlake-setup-and-repo-cache-fixes.report.md) landed 2026-11-25 in #4964, #4972, #4974: Isolate repository-cache startup sweep errors, refuse Tensorlake setup reruns on suspended or deleting sandboxes, and assert setup never reads agent settings
 - [`tab-switch-shortcuts`](reports/tab-switch-shortcuts.report.md) landed 2026-11-25 in #4983, #4989: Add Cmd+Shift+[ / Cmd+Shift+] (Ctrl+Shift+[ / Ctrl+Shift+] on Linux) to switch between terminal tabs within a session
