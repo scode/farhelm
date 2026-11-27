@@ -1873,14 +1873,17 @@ async fn deleting_a_session_fences_its_unbound_recorded_start() {
 /// the ended-agent guard, and leaves the launch for Delete to settle.
 ///
 /// Why: such a session may still be starting an agent, but with no terminal
-/// there is nothing for Stop to probe or stop. Stop used to record an exit it
-/// never observed and report success, leaving the recorded first stage free to
-/// start an agent its session shows as stopped. Spec: with a create interrupted after its
+/// for Stop to probe, it cannot tell what it would be stopping. Stop used to
+/// record an exit it never observed and report success, leaving the recorded
+/// first stage free to start an agent its session shows as stopped. Spec:
+/// with a create interrupted after its
 /// first stage took the spec (held, never released) and the supervisor
 /// restarted on the same state (premises: the row is launching with no
 /// terminal, no host socket exists, the recorded first stage runs, the launch
-/// record exists), an unguarded Stop fails with a conflict naming Delete; afterwards
-/// the row is still launching, its launch record is still there and the first
+/// record exists), an unguarded Stop fails with a conflict that says the
+/// latest launch was never confirmed and nothing was stopped, and names
+/// Delete; afterwards the row is still launching, its launch record is still
+/// there and the first
 /// stage still runs; an unconditional Delete then succeeds and ends the first
 /// stage, and the agent never started.
 #[farhelm_testtrace::test]
@@ -1969,7 +1972,9 @@ async fn stop_refuses_an_unconfirmed_start_and_leaves_it_for_delete() {
         .expect_err("Stop refuses the unconfirmed start");
     let message = format!("{error:#}");
     assert!(
-        message.contains("start was never confirmed") && message.contains("Delete the session"),
+        message.contains("latest launch was never confirmed")
+            && message.contains("nothing was stopped")
+            && message.contains("Delete the session"),
         "{message}"
     );
     assert_eq!(
