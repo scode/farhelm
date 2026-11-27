@@ -97,6 +97,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   using the keyboard, but they're just awkwardly invisible, and you can't see the current terminal that's selected, and
   we need to fix that.
 
+- **Warn before Cmd+W on the main agent kills terminal tabs.** When you hit Command W and the current Selected tab is
+  the main agent, the current default behavior is to kill the entire session. Let's give a warning to the user, even if
+  they otherwise have disabled the confirmation dialog, if there are other Terminal tabs, then we still give a warning.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
