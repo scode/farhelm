@@ -8,6 +8,11 @@
 //! The grace period is the sender's ([`Attention`]): every alert, waiting or
 //! blocked, is then held for the user's chosen time and withdrawn if the user
 //! attends to that session, or what it reports ends, before it is due.
+//!
+//! Quiet hours come last, at the moment an alert is sent ([`deliver`]): the local
+//! hour then decides its priority, or drops it when quiet hours send none. They
+//! are decided before the rate window counts the attempt, so a silenced alert
+//! takes no slot from one sent after quiet hours end.
 
 use crate::AppState;
 use crate::store::{HelmStore, HostId, SessionKey};
@@ -18,7 +23,7 @@ use axum::{
 };
 use farhelm_proto::{
     SessionInfo, SessionStatus,
-    ntfy::{SaveSettings, Settings},
+    ntfy::{Priority, SaveSettings, Settings, TestOutcome},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -82,6 +87,15 @@ impl Config {
         if grace_period_secs > farhelm_proto::ntfy::MAX_GRACE_PERIOD_SECS {
             return Err("the grace period must be at most 600 seconds");
         }
+        // An older client's save omits them too. Checked whether or not they are on, so that turning them on later
+        // never meets a range saved broken.
+        let quiet_hours = save.quiet_hours.unwrap_or(previous.settings.quiet_hours);
+        if quiet_hours.start_hour > 23 || quiet_hours.end_hour > 23 {
+            return Err("quiet hours must start and end on an hour from 00:00 to 23:00");
+        }
+        if quiet_hours.start_hour == quiet_hours.end_hour {
+            return Err("quiet hours must start and end at different hours");
+        }
         let same_origin = reqwest::Url::parse(&previous.settings.server_url)
             .is_ok_and(|previous| previous.origin() == server.origin());
         let token = match save.token {
@@ -120,6 +134,7 @@ impl Config {
                     .ask_agents_when_blocked
                     .or(previous.settings.ask_agents_when_blocked),
                 grace_period_secs,
+                quiet_hours,
             },
             token,
         })
@@ -377,8 +392,11 @@ struct Inner {
     /// The alerts the sender holds through the grace period, and the awareness that withdraws them. Shared outside
     /// the queue, so awareness and cancellation never wait behind queued alerts or a full queue.
     attention: Arc<Mutex<Attention>>,
+    /// Where quiet hours read the local hour, shared with the sender task.
+    clock: LocalClock,
     /// How many queued alerts the sender has taken and decided (sent, dropped or held), for tests that must know an
-    /// alert has reached the grace period's state before they act on it.
+    /// alert has reached the grace period's state before they act on it. Counted once the decision is carried out, so
+    /// an alert sent at once has been sent, or dropped by quiet hours, by the time it counts.
     #[cfg(test)]
     taken: tokio::sync::watch::Receiver<u64>,
     task: tokio::task::JoinHandle<()>,
@@ -440,6 +458,43 @@ impl AlertKind {
 impl Drop for Inner {
     fn drop(&mut self) {
         self.task.abort();
+    }
+}
+
+/// Where the sender and Send test read the local hour (0 to 23) that quiet hours compare against: the C library's
+/// local time ([`crate::local_time::hour_now`]), except in this crate's unit tests, where it is a value the test sets
+/// ([`Alerts::set_local_hour_for_test`], noon until then), so that no test depends on the machine's zone or the time it
+/// runs.
+#[derive(Clone, Default)]
+struct LocalClock {
+    #[cfg(test)]
+    hour: Arc<std::sync::atomic::AtomicU8>,
+}
+
+impl LocalClock {
+    /// The local hour now.
+    fn hour(&self) -> u8 {
+        #[cfg(test)]
+        {
+            self.hour.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        #[cfg(not(test))]
+        {
+            crate::local_time::hour_now()
+        }
+    }
+
+    /// A clock that reads noon until a test sets it.
+    #[cfg(test)]
+    fn new() -> Self {
+        Self {
+            hour: Arc::new(std::sync::atomic::AtomicU8::new(12)),
+        }
+    }
+
+    #[cfg(not(test))]
+    fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -640,6 +695,8 @@ impl Alerts {
     /// alert no longer held finds nothing due and sleeps again.
     pub(crate) fn with_client(store: HelmStore, client: Option<reqwest::Client>) -> Self {
         let (queue, mut receiver) = mpsc::channel::<Alert>(QUEUE_CAPACITY);
+        let clock = LocalClock::new();
+        let task_clock = clock.clone();
         let attention = Arc::new(Mutex::new(Attention::default()));
         let task_attention = Arc::clone(&attention);
         let task_store = store.clone();
@@ -653,15 +710,13 @@ impl Alerts {
                     .lock()
                     .expect("ntfy attention poisoned")
                     .next_due();
-                let ready = tokio::select! {
+                // Whether this turn took an alert from the queue, which the test counter counts once it is decided.
+                let (ready, from_queue) = tokio::select! {
                     received = receiver.recv() => {
                         let Some(alert) = received else {
                             break;
                         };
-                        let admitted = admit(alert, &task_store, &task_attention).await;
-                        #[cfg(test)]
-                        taken_tx.send_modify(|taken| *taken += 1);
-                        admitted
+                        (admit(alert, &task_store, &task_attention).await, true)
                     }
                     () = sleep_until_due(due) => {
                         let ready = task_attention
@@ -675,28 +730,34 @@ impl Alerts {
                         let Some(config) = read_config(&task_store).await else {
                             continue;
                         };
-                        Some((ready, config))
+                        (Some((ready, config)), false)
                     }
                 };
-                let Some((ready, config)) = ready else {
-                    continue;
-                };
-                for alert in ready {
-                    if alert.kind.sends(&config.settings) {
-                        deliver(
-                            alert,
-                            &config,
-                            &task_store,
-                            task_client.as_ref(),
-                            &mut window,
-                        )
-                        .await;
-                    } else {
-                        tracing::debug!(
-                            "this kind of ntfy alert was turned off while it was held; dropping it"
-                        );
+                if let Some((ready, config)) = ready {
+                    for alert in ready {
+                        if alert.kind.sends(&config.settings) {
+                            deliver(
+                                alert,
+                                &config,
+                                &task_store,
+                                task_client.as_ref(),
+                                &mut window,
+                                task_clock.hour(),
+                            )
+                            .await;
+                        } else {
+                            tracing::debug!(
+                                "this kind of ntfy alert was turned off while it was held; dropping it"
+                            );
+                        }
                     }
                 }
+                #[cfg(test)]
+                if from_queue {
+                    taken_tx.send_modify(|taken| *taken += 1);
+                }
+                #[cfg(not(test))]
+                let _ = from_queue;
             }
         });
         Self(Arc::new(Inner {
@@ -704,6 +765,7 @@ impl Alerts {
             client,
             queue,
             attention,
+            clock,
             #[cfg(test)]
             taken,
             task,
@@ -804,19 +866,35 @@ impl Alerts {
 
     /// Load the saved secret only inside the helm. A disabled switch does not
     /// prevent an explicit test, which is how users verify before enabling.
-    async fn test(&self) -> Result<(), String> {
+    ///
+    /// The test goes out at the priority alerts would have now, inside quiet
+    /// hours too, and says which ([`Settings::test_outcome`]); quiet hours that
+    /// silence alerts do not silence it, so the connection can be checked then.
+    async fn test(&self) -> Result<TestOutcome, String> {
         let config = self
             .0
             .store
             .ntfy_config()
             .await
             .map_err(|_| "could not read ntfy alert settings")?;
+        let outcome = config.settings.test_outcome(self.0.clock.hour());
         post(
             self.0.client.as_ref(),
             &config,
+            outcome.priority,
             "Farhelm ntfy alerts are working".into(),
         )
-        .await
+        .await?;
+        Ok(outcome)
+    }
+
+    /// Make the local hour quiet hours read `hour` from now on, for this sender and its Send test.
+    #[cfg(test)]
+    pub(crate) fn set_local_hour_for_test(&self, hour: u8) {
+        self.0
+            .clock
+            .hour
+            .store(hour, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -862,14 +940,21 @@ async fn read_config(store: &HelmStore) -> Option<Config> {
     }
 }
 
-/// Send one alert under the fleet-wide rate window, naming its host as the registry names it now.
+/// Send one alert under the fleet-wide rate window, naming its host as the registry names it now, at the priority
+/// quiet hours give it at `local_hour`. An alert that quiet hours silence is dropped before the rate window counts it,
+/// so it neither takes a slot nor adds to the "and N more" count, which is about the rate cap alone.
 async fn deliver(
     alert: Alert,
     config: &Config,
     store: &HelmStore,
     client: Option<&reqwest::Client>,
     window: &mut RateWindow,
+    local_hour: u8,
 ) {
+    let Some(priority) = config.settings.effective_priority(local_hour) else {
+        tracing::debug!("quiet hours send no ntfy alerts now; dropping alert");
+        return;
+    };
     let Some(dropped) = window.admit(Instant::now()) else {
         return;
     };
@@ -893,7 +978,7 @@ async fn deliver(
     if dropped > 0 {
         body.push_str(&format!(" (and {dropped} more)"));
     }
-    match post(client, config, body).await {
+    match post(client, config, priority, body).await {
         Ok(()) => tracing::info!("ntfy alert sent"),
         Err(reason) => tracing::warn!(%reason, "ntfy alert failed; dropping alert"),
     }
@@ -909,12 +994,13 @@ pub(crate) fn client_builder() -> reqwest::ClientBuilder {
         .user_agent(concat!("farhelm/", env!("CARGO_PKG_VERSION")))
 }
 
-/// Send exactly one body, ignoring the response body entirely. Errors are
+/// Send exactly one body at `priority`, ignoring the response body entirely. Errors are
 /// classified into fixed reasons; the topic-bearing request URL is stripped
 /// even before classification and no source chain is displayed or logged.
 async fn post(
     client: Option<&reqwest::Client>,
     config: &Config,
+    priority: Priority,
     body: String,
 ) -> Result<(), String> {
     if config.settings.topic.is_empty() {
@@ -925,7 +1011,7 @@ async fn post(
     let mut request = client
         .post(url)
         .header("Title", "Farhelm")
-        .header("Priority", config.settings.priority.header())
+        .header("Priority", priority.header())
         .header("Content-Type", "text/plain; charset=utf-8")
         .body(body);
     if let Some(token) = &config.token {
@@ -993,9 +1079,11 @@ pub(crate) async fn put(
 /// One user-initiated send waits under the short HTTP timeout, independently of
 /// background work. A client going away does not retract its accepted request.
 /// The authenticated router owns the saved-settings read and the send together.
+/// A sent test answers with what it did ([`TestOutcome`]), so the form can say
+/// which priority it went at and whether quiet hours decided that.
 pub(crate) async fn test(State(state): State<Arc<AppState>>) -> Response {
     match state.ntfy.test().await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(outcome) => axum::Json(outcome).into_response(),
         Err(reason) => (StatusCode::BAD_GATEWAY, reason).into_response(),
     }
 }

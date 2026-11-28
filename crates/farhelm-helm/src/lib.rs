@@ -139,6 +139,10 @@ mod notices;
 mod feedback;
 mod ntfy;
 
+/// The C library's local time zone: ntfy quiet hours read the local hour from it, and the desktop app's clock times
+/// read their offsets through it, so the two unsafe calls exist once.
+pub mod local_time;
+
 /// `/api/credentials` — the named credential catalog: saved secrets can be
 /// replaced but are never returned.
 mod credentials;

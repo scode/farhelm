@@ -479,6 +479,7 @@ fn save(server: &str, token: Option<&str>, enabled: bool) -> SaveSettings {
         custom_blocked_criteria: None,
         ask_agents_when_blocked: None,
         grace_period_secs: Some(0),
+        quiet_hours: None,
         enabled,
         server_url: server.into(),
         topic: TOPIC.into(),
@@ -837,7 +838,7 @@ async fn changing_server_from_a_stale_form_never_forwards_the_saved_token() {
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
         second.arrived(index + 1).await;
         let received = second.received.lock().unwrap()[index].clone();
         assert_eq!(received.body, "Farhelm ntfy alerts are working");
@@ -908,7 +909,7 @@ async fn test_send_request_shape_and_saved_secret() {
         ))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::OK);
     server.arrived(1).await;
     let received = server.received.lock().unwrap()[0].clone();
     assert_eq!(received.method, "POST");
@@ -2213,4 +2214,276 @@ async fn an_aged_interaction_withdraws_only_what_began_before_it() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(!holds(&harness, host, SESSION, Kind::Waiting));
     nothing_sent(&server);
+}
+
+// Quiet hours: the save's rules, the priority a sent alert goes out at, Off dropping alerts before the rate cap, and
+// what Send test does and reports. The local hour is the sender's test cell (`Alerts::set_local_hour_for_test`), never
+// the machine's clock or zone.
+
+/// The quiet hours this section saves: 22:00 to 07:00 at `priority`, on.
+fn quiet(priority: Option<Priority>) -> farhelm_proto::ntfy::QuietHours {
+    farhelm_proto::ntfy::QuietHours {
+        enabled: true,
+        start_hour: 22,
+        end_hour: 7,
+        priority,
+    }
+}
+
+/// Save every alert switched on with no grace period, at the saved priority Urgent, and `quiet` as the quiet hours,
+/// on the stand-in at `server`.
+async fn save_quiet(
+    harness: &Harness,
+    server: &StandIn,
+    quiet_hours: farhelm_proto::ntfy::QuietHours,
+) {
+    let config = SaveSettings {
+        quiet_hours: Some(quiet_hours),
+        ..save(&server.server_url, Some(TOKEN), true)
+    };
+    harness.store.save_ntfy_config(config).await.ok().unwrap();
+}
+
+/// The priority header of the `index`th request the stand-in received.
+fn priority_header(server: &StandIn, index: usize) -> String {
+    server.received.lock().unwrap()[index].headers["priority"]
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+/// A stored range quiet hours could never match would silence nothing while the form showed it on, and an older
+/// client's save must not drop the user's quiet hours. Specified: a range that wraps past midnight saves; whether or not
+/// quiet hours are on, an hour of 24 or more is refused with the hours message and a start equal to the end with the
+/// different-hours message; a save without quiet hours keeps the stored ones, Off included.
+#[farhelm_testtrace::test]
+fn quiet_hours_save_within_their_rules() {
+    let previous = Config {
+        settings: Settings::default(),
+        token: None,
+    };
+    let with = |quiet_hours| SaveSettings {
+        quiet_hours,
+        ..save("https://ntfy.sh", None, true)
+    };
+    let saved = Config::saved(previous.clone(), with(Some(quiet(None)))).unwrap();
+    assert_eq!(saved.settings.quiet_hours, quiet(None));
+    for enabled in [true, false] {
+        for (start_hour, end_hour) in [(24, 7), (22, 24), (255, 0)] {
+            assert_eq!(
+                Config::saved(
+                    previous.clone(),
+                    with(Some(farhelm_proto::ntfy::QuietHours {
+                        enabled,
+                        start_hour,
+                        end_hour,
+                        ..quiet(None)
+                    }))
+                )
+                .err(),
+                Some("quiet hours must start and end on an hour from 00:00 to 23:00"),
+                "{start_hour} to {end_hour}, enabled: {enabled}"
+            );
+        }
+    }
+    for enabled in [true, false] {
+        assert_eq!(
+            Config::saved(
+                previous.clone(),
+                with(Some(farhelm_proto::ntfy::QuietHours {
+                    enabled,
+                    start_hour: 8,
+                    end_hour: 8,
+                    ..quiet(None)
+                }))
+            )
+            .err(),
+            Some("quiet hours must start and end at different hours"),
+            "enabled: {enabled}"
+        );
+    }
+    let kept = Config::saved(saved, with(None)).unwrap();
+    assert_eq!(kept.settings.quiet_hours, quiet(None));
+}
+
+/// The stored quiet hours must survive the database and come back through the route, Off as Off, or the form would
+/// show and resend a choice the helm does not hold. Specified: a `PUT /api/ntfy-alerts` with quiet hours 21 to 6 at
+/// Off answers them with a null priority and the next `GET` answers the same; a `PUT` with equal hours is refused with
+/// 400 and the fixed message, and leaves them stored.
+#[farhelm_testtrace::test]
+async fn quiet_hours_round_trip_through_the_route() {
+    let harness = helm().await;
+    let mut body = serde_json::to_value(save("https://ntfy.sh", None, true)).unwrap();
+    body["quiet_hours"] =
+        serde_json::json!({"enabled": true, "start_hour": 21, "end_hour": 6, "priority": null});
+    let response = harness
+        .router()
+        .oneshot(request("PUT", "/api/ntfy-alerts", body.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let answered: serde_json::Value = serde_json::from_str(&text(response).await).unwrap();
+    assert_eq!(answered["quiet_hours"], body["quiet_hours"]);
+    let mut equal = body.clone();
+    equal["quiet_hours"]["end_hour"] = 21.into();
+    let response = harness
+        .router()
+        .oneshot(request("PUT", "/api/ntfy-alerts", equal))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        text(response).await,
+        "quiet hours must start and end at different hours"
+    );
+    let response = harness
+        .router()
+        .oneshot(request("GET", "/api/ntfy-alerts", serde_json::Value::Null))
+        .await
+        .unwrap();
+    let read: serde_json::Value = serde_json::from_str(&text(response).await).unwrap();
+    assert_eq!(read["quiet_hours"], body["quiet_hours"]);
+}
+
+/// Quiet hours exist to make alerts quieter at night, so the alert actually sent must carry their priority then and
+/// the saved one otherwise, judged when it is sent. Specified: with quiet hours 22:00 to 07:00 at Min and the saved
+/// priority Urgent, a waiting alert sent at 23:00 goes out at `min`, and a blocked alert sent at 12:00 at `urgent`.
+#[farhelm_testtrace::test]
+async fn quiet_hours_set_a_sent_alerts_priority() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    save_quiet(&harness, &server, quiet(Some(Priority::Min))).await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.state.ntfy.set_local_hour_for_test(23);
+    harness.state.ntfy.enqueue(host, settled_now());
+    server.arrived(1).await;
+    assert_eq!(priority_header(&server, 0), "min");
+    harness.state.ntfy.set_local_hour_for_test(12);
+    harness.state.ntfy.enqueue_blocked(
+        SessionKey::new(host, SESSION),
+        TITLE.into(),
+        "deploy: no credentials".into(),
+        Instant::now(),
+    );
+    server.arrived(2).await;
+    assert_eq!(priority_header(&server, 1), "urgent");
+    assert!(
+        server.received.lock().unwrap()[1]
+            .body
+            .contains("is blocked")
+    );
+}
+
+/// Quiet hours set to Off must send nothing, and an alert they drop must not count against the five-a-minute cap, or
+/// a quiet night would swallow the first alerts of the morning. The sender takes the queue in order, so the second
+/// batch arriving shows the first was decided before it. Specified: at 03:00 with quiet hours at Off, five waiting
+/// alerts for five sessions send nothing; at 12:00 five more for five other sessions all arrive at `urgent`, with no
+/// "more" count, and none of the first five arrives.
+#[farhelm_testtrace::test]
+async fn quiet_hours_set_to_off_drop_alerts_without_using_the_rate_cap() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    save_quiet(&harness, &server, quiet(None)).await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    let settled = |name: String| Settled {
+        id: name.clone(),
+        title: name,
+        since: Instant::now(),
+    };
+    harness.state.ntfy.set_local_hour_for_test(3);
+    for n in 0..PER_MINUTE {
+        harness
+            .state
+            .ntfy
+            .enqueue(host, settled(format!("quiet-{n}")));
+    }
+    taken(&harness, u64::try_from(PER_MINUTE).unwrap()).await;
+    // The premise: quiet hours at Off sent none of them. `taken` counts an at-once alert once it is delivered or
+    // dropped, so nothing of the first five is still on its way.
+    nothing_sent(&server);
+    harness.state.ntfy.set_local_hour_for_test(12);
+    for n in 0..PER_MINUTE {
+        harness
+            .state
+            .ntfy
+            .enqueue(host, settled(format!("day-{n}")));
+    }
+    server.arrived(PER_MINUTE).await;
+    let received = server.received.lock().unwrap().clone();
+    let bodies: Vec<String> = received.iter().map(|r| r.body.clone()).collect();
+    let expected: Vec<String> = (0..PER_MINUTE)
+        .map(|n| format!("day-{n} on this machine is waiting for you"))
+        .collect();
+    assert_eq!(bodies, expected);
+    assert!(received.iter().all(|r| r.headers["priority"] == "urgent"));
+}
+
+/// Send test must say what priority it went at and why, and must still go out during quiet hours that silence
+/// alerts, since checking the connection is its job (SPEC.md, "Settings → Notifications"). Specified, with the saved
+/// priority Urgent and quiet hours 22:00 to 07:00: at 12:00 at Min it answers 200 with `urgent` and `inactive` and is
+/// sent at `urgent`; at 23:00 at Min, `min` and `active`, sent at `min`; at 23:00 at Off, `urgent` and `silenced`, sent
+/// at `urgent`.
+#[farhelm_testtrace::test]
+async fn send_test_reports_the_priority_quiet_hours_give_it() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    let cases = [
+        (Some(Priority::Min), 12, "urgent", "inactive"),
+        (Some(Priority::Min), 23, "min", "active"),
+        (None, 23, "urgent", "silenced"),
+    ];
+    for (index, (priority, hour, sent, quiet_hours)) in cases.into_iter().enumerate() {
+        save_quiet(&harness, &server, quiet(priority)).await;
+        harness.state.ntfy.set_local_hour_for_test(hour);
+        let response = harness
+            .router()
+            .oneshot(request(
+                "POST",
+                "/api/ntfy-alerts/test",
+                serde_json::Value::Null,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "case {index}");
+        let answered: serde_json::Value = serde_json::from_str(&text(response).await).unwrap();
+        assert_eq!(
+            answered,
+            serde_json::json!({"priority": sent, "quiet_hours": quiet_hours}),
+            "case {index}"
+        );
+        server.arrived(index + 1).await;
+        assert_eq!(priority_header(&server, index), sent, "case {index}");
+    }
+}
+
+/// Quiet hours must be judged when a held alert is finally sent, not when it was queued: an alert queued at 21:59 and
+/// held through the grace period goes out after quiet hours began, and must be quiet. Judging at the queue would pass
+/// every other test here, which send at once. Specified, on a paused clock: with a 10-second grace period and quiet
+/// hours 22:00 to 07:00 at Min, a waiting alert queued at 12:00 is held; the hour then turns 23:00 and the clock passes
+/// the grace period, and the alert arrives at `min`.
+#[farhelm_testtrace::test]
+async fn quiet_hours_are_decided_when_a_held_alert_is_sent() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    let config = SaveSettings {
+        grace_period_secs: Some(u32::try_from(GRACE.as_secs()).unwrap()),
+        quiet_hours: Some(quiet(Some(Priority::Min))),
+        ..save(&server.server_url, Some(TOKEN), true)
+    };
+    harness.store.save_ntfy_config(config).await.ok().unwrap();
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.state.ntfy.set_local_hour_for_test(12);
+    harness.state.ntfy.enqueue(host, settled_now());
+    taken(&harness, 1).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting),
+        "the premise: it is held, unsent"
+    );
+    nothing_sent(&server);
+    harness.state.ntfy.set_local_hour_for_test(23);
+    tokio::time::pause();
+    tokio::time::advance(GRACE + Duration::from_secs(1)).await;
+    tokio::time::resume();
+    server.arrived(1).await;
+    assert_eq!(priority_header(&server, 0), "min");
 }

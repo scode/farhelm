@@ -6480,6 +6480,19 @@ older than an hour are pruned once there are more than 256, and after a prune th
 `grace_period_secs` is a `u32` in the same singleton, defaulting to 10 when absent (configurations saved before it
 existed), kept when a save omits it, and refused above 600 with a fixed message.
 
+Quiet hours (`farhelm_proto::ntfy::QuietHours`: a switch, a start and end hour, and a priority where `null` is Off) are
+stored in the same singleton, read as off from 22:00 to 07:00 at Low when absent, and kept when a save omits them. Every
+save refuses an hour above 23 or a start equal to the end, with fixed messages, whether or not they are on, so turning
+them on later never meets a broken range. The range is half-open and wraps past midnight. The sender decides quiet hours
+last, in `deliver`, when the alert goes out (after any grace period, so an alert held across the start of quiet hours
+goes out quietly): `Settings::effective_priority` gives the `Priority` header, or `None` for Off, which drops the alert
+before `RateWindow::admit`, so a silenced alert takes no slot and adds nothing to the "and N more" count. The local hour
+comes from `farhelm_helm::local_time`, the C library's `tzset` and `localtime_r` (the same two calls the desktop app's
+clock times use, which delegate there), with `tzset` called before each read so a zone change counts; it reads the zone
+of the machine the helm runs on, not the viewer's. `Alerts` reads the hour through one clock, the C library's in every
+build but the crate's own unit tests, where it is a value the test sets (`set_local_hour_for_test`), so no test depends
+on the machine's zone or clock.
+
 Blocked alerts share that queue, sender and rate window as a second alert kind. `farhelm agent notify` relays
 `AgentVerb::Notify` (protocol 93) over the authenticated agent relay. It is not a mutating verb, so it takes no session
 change fence: an agent blocked on its own change still waiting for an approval card can report it, and a retry after a
@@ -6510,8 +6523,11 @@ echo secret input. Server URLs are http(s), at most 2048 bytes, without credenti
 ntfy's 64-character ASCII letter/digit/underscore/dash grammar and may be empty only while disabled. Tokens contain at
 most 4096 visible ASCII bytes. The form saves explicitly and shows its outcome; it never receives the stored token. POST
 `/api/ntfy-alerts/test` posts with saved settings even while disabled, bypasses queue/policy/cap, and waits on one owned
-send under the same timeout. Closing Settings waits for a save or test that is out; one that outlives the dialog (its
-window closing) is not retracted, and component state is updated only while mounted.
+send under the same timeout. It goes at the priority alerts would have now and answers 200 with that priority and
+whether quiet hours were in force (`TestOutcome`); quiet hours set to Off do not stop it, and it then goes at the saved
+priority and says that real alerts are silenced, so the connection can still be checked. Closing Settings waits for a
+save or test that is out; one that outlives the dialog (its window closing) is not retracted, and component state is
+updated only while mounted.
 
 ## Named credential catalog
 

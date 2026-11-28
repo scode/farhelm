@@ -4018,6 +4018,7 @@ async fn hook_setup_consent_reaches_creates_restarts_and_replacements() {
                 custom_blocked_criteria: Some("the build is red".into()),
                 ask_agents_when_blocked: None,
                 grace_period_secs: None,
+                quiet_hours: None,
             })
             .await
             .ok()
