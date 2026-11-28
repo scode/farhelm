@@ -804,3 +804,79 @@ fn enter_on_a_closed_select_with_a_main_action_runs_it_with_the_value_shown(
         "without running the action"
     );
 }
+
+/// Why this matters: the layer manager only shifts a popover back inside the window's content area, so a list taller
+/// than that area (ntfy quiet hours' 24 hours, in a short window) would run past the window's bottom with its options
+/// out of reach, and the chosen hour, far down the list, would open out of sight.
+///
+/// Specified: in a 720 by 400 window, a select of the 24 hours with 23:00 chosen opens a list no taller than the
+/// content area allows (`notices_bell::window_cap`) and wholly inside the content area; its options are taller than
+/// the list, so it scrolls; 23:00, focused, shows whole inside the list's border while 00:00 is scrolled out above it;
+/// Up, pressed until 00:00 holds focus, scrolls 00:00 whole into the list's border too.
+#[gpui::test]
+fn a_long_select_list_is_capped_at_the_window_and_keeps_its_focus_in_view(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        div()
+            .w(px(320.))
+            .child(
+                Select::new(
+                    "hours",
+                    "Hour",
+                    HoverHelp::tooltip("An hour"),
+                    Role::ComboBox,
+                )
+                .options((0..24u8).map(|hour| {
+                    SelectOption::new(
+                        hour.to_string(),
+                        format!("{hour:02}:00"),
+                        HoverHelp::tooltip("An hour"),
+                    )
+                }))
+                .chosen("23"),
+            )
+            .into_any_element()
+    });
+    cx.simulate_resize(gpui::size(px(720.), px(400.)));
+    redraw(cx);
+    click(cx, "hours");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("hours-option-23"),
+        "the premise: the list opened on the chosen hour"
+    );
+    let (area, cap) = cx.update(|window, _| {
+        (
+            crate::desktop::linux_title_bar::content_area(window),
+            crate::notices_bell::window_cap(window),
+        )
+    });
+    let list = bounds(cx, "hours-list");
+    assert!(list.size.height <= cap, "{list:?} is capped at {cap:?}");
+    // Inside the panel's one-pixel border, which clips what scrolls under it.
+    let inside = |option: gpui::Bounds<gpui::Pixels>| {
+        option.top() >= list.top() + px(1.) && option.bottom() <= list.bottom() - px(1.)
+    };
+    assert!(
+        list.top() >= area.top() && list.bottom() <= area.bottom(),
+        "{list:?} inside {area:?}"
+    );
+    let (first, last) = (bounds(cx, "hours-option-0"), bounds(cx, "hours-option-23"));
+    assert!(
+        last.bottom() - first.top() > list.size.height,
+        "the premise: the options are taller than the list, so it must scroll"
+    );
+    assert!(
+        inside(last),
+        "the chosen hour {last:?} shows whole in {list:?}"
+    );
+    assert!(
+        first.bottom() <= list.top(),
+        "00:00 {first:?} is scrolled out above {list:?}"
+    );
+    for _ in 0..23 {
+        keys(cx, "up");
+    }
+    assert_eq!(focused_id(cx).as_deref(), Some("hours-option-0"));
+    let first = bounds(cx, "hours-option-0");
+    assert!(inside(first), "00:00 {first:?} shows whole in {list:?}");
+}

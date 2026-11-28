@@ -210,6 +210,16 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
             Section::Notifications,
             super::ntfy::GRACE_ID,
         ),
+        // Quiet hours: by name, by the words someone uses who has not met the name, and by an hour's label.
+        ("quiet hours", Section::Notifications, "ntfy-quiet-hours"),
+        ("do not disturb", Section::Notifications, "ntfy-quiet-hours"),
+        ("night", Section::Notifications, super::ntfy::QUIET_START_ID),
+        ("23:00", Section::Notifications, super::ntfy::QUIET_END_ID),
+        (
+            "silent",
+            Section::Notifications,
+            super::ntfy::QUIET_PRIORITY_ID,
+        ),
     ] {
         let words: Vec<_> = query.split_whitespace().map(fold).collect();
         assert!(

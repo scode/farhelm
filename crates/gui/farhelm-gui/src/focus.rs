@@ -93,9 +93,10 @@
 //!   update that shows it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A
 //!   move to another control of the open dialog goes through [`focus_in_layer`], which moves and scrolls only once a
 //!   frame has drawn the control, whether a result arrives later or the user's action there shows the control: the
-//!   launcher's Custom choice, for one, moves focus into the flags field it shows (SPEC.md). Nothing yet scrolls to a
-//!   layer's start below the fold; SPEC.md's archive global confirmation, whose actions are brought into view when it
-//!   opens, will need it.
+//!   launcher's Custom choice, for one, moves focus into the flags field it shows (SPEC.md). Nothing here scrolls to a
+//!   layer's start below the fold (the select's list does it for itself, asking [`reveal_control`] for its start after
+//!   its first frame); SPEC.md's archive global confirmation, whose actions are brought into view when it opens, will
+//!   need it.
 //!
 //! NOTE: Agent approval cards (the layer manager's approval region, [`layers::install_approval_region`]) are the one
 //! place outside the topmost dialog where [`invariant_violation`] lets focus be while a dialog is open. Nothing else

@@ -1,7 +1,8 @@
 //! Settings → Notifications, its two helm-configured cards: **Blocked agents** (whether the agents Farhelm starts are
 //! asked to run `farhelm agent notify` when they are blocked, and what counts as blocked) and **ntfy alerts** (whether
 //! the helm sends an alert when a session waits for the user or says it is blocked, how long it holds an alert back in
-//! case the user attends to the session first, and the ntfy server, topic, access token and priority it sends with).
+//! case the user attends to the session first, the ntfy server, topic, access token and priority it sends with, and
+//! quiet hours, a daily range of hours with another priority or none).
 //!
 //! Both cards are one form over one helm configuration: the instruction choice is stored with the ntfy settings
 //! (`farhelm_proto::ntfy::Settings::ask_agents_when_blocked`), so it shares their read, their one Save and their
@@ -27,6 +28,10 @@
 //!   `drafts.rs`. The text fields are bound to the draft here instead: an edit goes into the draft (refused, and
 //!   the field put back, while the save is in flight), and the fields are read-only while it is. The token field is
 //!   also read-only while Clear saved token is on, as the old one was.
+//! - **Quiet hours are the helm's clock.** The helm decides them when it sends, by the local time of the machine it runs
+//!   on, so the form shows no clock of its own and says whose time it is ([`QUIET_NOTE`]). Start and end are hour
+//!   selects with all 24 hours, and the form does not refuse a start equal to the end: the helm's Save refusal says so,
+//!   which keeps swapping 22:00–07:00 to 07:00–22:00 from passing through a refused state.
 //! - **The token is write-only.** The helm never returns it; the form shows whether one is saved (`token_set`) and
 //!   offers to replace it (type one) or clear it ("Clear saved token"). A blank token field sends `null`, which the helm
 //!   reads as "keep the saved token", but only on the same server: changing to another server clears it unless a new
@@ -41,14 +46,18 @@
 //! - **Send test is not a save.** It asks the helm to send one alert with the settings it stores, even while alerts are
 //!   off, and sends nothing of the form (SPEC.md: "Send test uses the saved configuration"). It changes nothing, so it
 //!   is no operation on a key: it goes out with [`crate::operations::send`] and its answer shows in place, "Test alert
-//!   sent" or the helm's reason, until the next edit, save or test. A refused save's words stay above it until the next
+//!   sent" with the priority it went at and whether quiet hours decided it ([`tested_line`]), or the helm's reason,
+//!   until the next edit, save or test. A refused save's words stay above it until the next
 //!   save, as a draft's refusal does, where the old form showed one outcome at a time. While it is out the form is
 //!   locked as for a save, as the old one was, so a Save cannot overtake it. It moves no focus and opens nothing.
 //!
 //! The Sounds card above this form has four switches. Each writes its own preference immediately.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
-use farhelm_proto::ntfy::{DEFAULT_BLOCKED_CRITERIA, Priority, SaveSettings, Settings};
+use farhelm_proto::ntfy::{
+    DEFAULT_BLOCKED_CRITERIA, Priority, QuietHours, QuietHoursNow, SaveSettings, Settings,
+    TestOutcome,
+};
 use farhelm_proto::{LaunchHarness, WaitingAlertSupport};
 use gpui::{
     AnyWindowHandle, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -59,8 +68,8 @@ use gpui::{
 use super::choices;
 use super::{Refused, card};
 use crate::components::{
-    Button, Checkbox, HoverHelp, RadioGroup, RadioOption, TextInput, TextInputEvent,
-    TextInputState, Tier,
+    Button, Checkbox, HoverHelp, RadioGroup, RadioOption, Select, SelectOption, TextInput,
+    TextInputEvent, TextInputState, Tier,
 };
 use crate::drafts::{self, Draft};
 use crate::host_text::HostText;
@@ -121,6 +130,63 @@ fn grace_choices(current: u32) -> Vec<u32> {
     choices
 }
 
+/// The quiet hours note, under their switch: whose clock they follow, how the range reads, and that Send test still
+/// proves the connection when they send nothing (SPEC.md, "Settings → Notifications").
+pub(super) const QUIET_NOTE: &str = "Uses the clock of the machine this helm runs on. From the start hour up to the \
+     end hour, which can run past midnight, alerts go out at the priority below, or not at all with Off. Send test \
+     still sends.";
+/// The quiet hours selects' and segments' ids, shared with Settings search.
+pub(super) const QUIET_START_ID: &str = "ntfy-quiet-start";
+pub(super) const QUIET_END_ID: &str = "ntfy-quiet-end";
+pub(super) const QUIET_PRIORITY_ID: &str = "ntfy-quiet-priority";
+/// The quiet hours start select's accessible name; the form captions it "Start".
+pub(super) const QUIET_START_LABEL: &str = "Quiet hours start";
+/// The quiet hours end select's accessible name; the form captions it "End".
+pub(super) const QUIET_END_LABEL: &str = "Quiet hours end";
+/// The hour selects' hover help.
+pub(super) const QUIET_HOURS_HELP: &str =
+    "An hour on the clock of the machine this helm runs on; Save applies it";
+/// The quiet hours priority segments' caption and accessible name.
+pub(super) const QUIET_PRIORITY_LABEL: &str = "Quiet hours priority";
+/// The quiet hours priority segments' hover help.
+pub(super) const QUIET_PRIORITY_HELP: &str =
+    "Priority for alerts during quiet hours, or Off to send none; Save applies it";
+
+/// An hour as the selects show it: `07:00`.
+pub(super) fn hour_label(hour: u8) -> String {
+    format!("{hour:02}:00")
+}
+
+/// The quiet hours priorities offered, in segment order: Off (no alerts), then the five ntfy priorities.
+pub(super) fn quiet_priorities() -> impl Iterator<Item = Option<Priority>> {
+    std::iter::once(None).chain(PRIORITIES.into_iter().map(Some))
+}
+
+/// A quiet hours priority's segment label: "Off" for none, else the priority's own.
+pub(super) fn quiet_priority_label(priority: Option<Priority>) -> &'static str {
+    priority.map_or("Off", Priority::display_label)
+}
+
+/// The line a sent test shows: the priority it went at and, inside quiet hours, that they decided it. A helm that
+/// answers without an outcome (one older than quiet hours) gets the plain line.
+pub(super) fn tested_line(outcome: Option<TestOutcome>) -> String {
+    let Some(TestOutcome {
+        priority,
+        quiet_hours,
+    }) = outcome
+    else {
+        return "Test alert sent".to_owned();
+    };
+    let priority = priority.display_label();
+    match quiet_hours {
+        QuietHoursNow::Inactive => format!("Test alert sent ({priority})"),
+        QuietHoursNow::Active => format!("Test alert sent ({priority} \u{2014} quiet hours)"),
+        QuietHoursNow::Silenced => format!(
+            "Test alert sent ({priority} \u{2014} quiet hours active and set to Off; real alerts are silenced)"
+        ),
+    }
+}
+
 /// Every priority, in the order the old segments showed them.
 pub(super) const PRIORITIES: [Priority; 5] = [
     Priority::Min,
@@ -148,6 +214,8 @@ struct Form {
     priority: Priority,
     /// How long the helm holds an alert back, in seconds ([`Settings::grace_period_secs`]).
     grace_period_secs: u32,
+    /// Quiet hours as edited ([`Settings::quiet_hours`]), sent whole with every save.
+    quiet_hours: QuietHours,
     token: String,
     clear: bool,
 }
@@ -165,6 +233,7 @@ impl Form {
             topic: stored.topic.clone(),
             priority: stored.priority,
             grace_period_secs: stored.grace_period_secs,
+            quiet_hours: stored.quiet_hours,
             token: String::new(),
             clear: false,
         }
@@ -193,8 +262,7 @@ impl Form {
             // into a stored one, and later changes to the ntfy switches no longer move it.
             ask_agents_when_blocked: Some(self.ask_agents),
             grace_period_secs: Some(self.grace_period_secs),
-            // This form has no quiet hours controls yet, so it keeps the stored ones.
-            quiet_hours: None,
+            quiet_hours: Some(self.quiet_hours),
         }
     }
 
@@ -393,6 +461,8 @@ pub(super) enum Switch {
     /// Whether the agents Farhelm starts are asked to notify when blocked, in the Blocked agents card: independent of
     /// the master switch.
     AskAgents,
+    /// Quiet hours, above their hours and priority.
+    QuietHours,
 }
 
 impl Switch {
@@ -425,6 +495,11 @@ impl Switch {
                 "Ask the agents Farhelm starts to run farhelm agent notify instead of stopping silently; Save \
                  applies it",
             ),
+            Self::QuietHours => (
+                "ntfy-quiet-hours",
+                "Quiet hours",
+                "During a daily range of hours, send alerts at another priority or not at all; Save applies it",
+            ),
         }
     }
 }
@@ -438,6 +513,7 @@ pub(super) struct NtfyAlerts {
     blocked_focus: gpui::FocusHandle,
     clear_focus: gpui::FocusHandle,
     ask_focus: gpui::FocusHandle,
+    quiet_focus: gpui::FocusHandle,
     /// What the helm last said it stores: the read's answer, then each done save's. `None` until the read answers.
     stored: Option<Settings>,
     /// Why the last read failed, until a read answers.
@@ -454,8 +530,9 @@ pub(super) struct NtfyAlerts {
     saved: bool,
     /// Whether Send test is out; the form is locked meanwhile.
     testing: bool,
-    /// How the last Send test went, until the next edit, save or test.
-    tested: Option<Result<(), HostText>>,
+    /// How the last Send test went, until the next edit, save or test: what the helm says it did (`None` from a helm
+    /// that answers with no outcome), or its reason.
+    tested: Option<Result<Option<TestOutcome>, HostText>>,
     /// Whether the last Save sent nothing because another Settings save held the key, which the form says until its
     /// next save starts.
     refused: Refused,
@@ -478,6 +555,7 @@ impl NtfyAlerts {
             blocked_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
             ask_focus: cx.focus_handle().tab_stop(true),
+            quiet_focus: cx.focus_handle().tab_stop(true),
             stored: None,
             unreadable: None,
             form: Draft::load(Form::over(&Settings::default())),
@@ -582,6 +660,7 @@ impl NtfyAlerts {
             Switch::Blocked => &self.blocked_focus,
             Switch::ClearToken => &self.clear_focus,
             Switch::AskAgents => &self.ask_focus,
+            Switch::QuietHours => &self.quiet_focus,
         }
     }
 
@@ -798,7 +877,10 @@ impl NtfyAlerts {
             crate::operations::send(Method::Post, path, None, shown, cx, move |answer, cx| {
                 let _ = alerts.update(cx, |alerts, cx| {
                     alerts.testing = false;
-                    alerts.tested = Some(answer.map(|_| ()));
+                    // A body that is not an outcome (none, from an older helm) still means the test was sent.
+                    alerts.tested = Some(answer.map(|body| {
+                        body.and_then(|body| serde_json::from_value::<TestOutcome>(body).ok())
+                    }));
                     alerts.hold(cx);
                     let failed = alerts.test_failed();
                     alerts.save_receipt.settled_other(failed, cx);
@@ -941,6 +1023,130 @@ impl NtfyAlerts {
             .child(card::help("ntfy-grace-note", GRACE_NOTE, cx).min_w_0())
     }
 
+    /// The quiet hours row, after the connection settings: the switch with its note, the start and end hours side by
+    /// side, and the priority segments across the card's width, since six choices do not fit the half-width column
+    /// the saved priority sits in. A choice goes into the form and saves nothing, as every control here does.
+    fn quiet_hours_row(&self, palette: &theme::Palette, cx: &Context<Self>) -> Div {
+        let quiet = self.form.value().quiet_hours;
+        let stored = self.stored.as_ref().map(|stored| stored.quiet_hours);
+        let edited = |differs: fn(&QuietHours, &QuietHours) -> bool| {
+            stored.is_some_and(|stored| differs(&quiet, &stored))
+        };
+        // `wrapper` names the box around the select (`choices::field_with_caption`), apart from the select's own id,
+        // which the select's control carries for tests and search.
+        let hour = |id: &'static str,
+                    wrapper: &'static str,
+                    label: &'static str,
+                    caption: &'static str,
+                    chosen: u8,
+                    edited: bool,
+                    set: fn(&mut QuietHours, u8)| {
+            let weak = cx.weak_entity();
+            let select = Select::new(
+                id,
+                label,
+                HoverHelp::tooltip(QUIET_HOURS_HELP),
+                Role::ComboBox,
+            )
+            .options((0..24u8).map(|hour| {
+                SelectOption::new(
+                    hour.to_string(),
+                    hour_label(hour),
+                    HoverHelp::tooltip(QUIET_HOURS_HELP),
+                )
+            }))
+            .chosen(chosen.to_string())
+            .disabled(self.locked())
+            .on_choose(move |value, _, cx| {
+                let Ok(hour) = value.parse::<u8>() else {
+                    return;
+                };
+                let _ = weak.update(cx, |alerts, cx| {
+                    let _ = alerts.edit(|form| set(&mut form.quiet_hours, hour), cx);
+                });
+            });
+            choices::field_with_caption(wrapper, select, card::caption(caption, edited, palette))
+        };
+        let choose = cx.weak_entity();
+        let priority = div()
+            .flex()
+            .flex_col()
+            .gap(px(choices::LABEL_GAP))
+            .w_full()
+            .min_w_0()
+            .child(card::caption(
+                QUIET_PRIORITY_LABEL,
+                edited(|form, stored| form.priority != stored.priority),
+                palette,
+            ))
+            .child(
+                div().flex().min_w_0().child(
+                    quiet_priorities()
+                        .fold(
+                            RadioGroup::new(
+                                QUIET_PRIORITY_ID,
+                                QUIET_PRIORITY_LABEL,
+                                HoverHelp::tooltip(QUIET_PRIORITY_HELP),
+                                Role::Group,
+                            )
+                            .small_segments()
+                            .fit_words(true),
+                            |group, priority| {
+                                group.option(RadioOption::new(
+                                    quiet_priority_label(priority),
+                                    HoverHelp::tooltip(QUIET_PRIORITY_HELP),
+                                    priority,
+                                ))
+                            },
+                        )
+                        .chosen(Some(quiet.priority))
+                        .disabled(self.locked())
+                        .on_change(move |&chosen, _, cx| {
+                            let _ = choose.update(cx, |alerts, cx| {
+                                let _ = alerts.edit(|form| form.quiet_hours.priority = chosen, cx);
+                            });
+                        }),
+                ),
+            );
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(FIELD_GAP))
+            .w_full()
+            .min_w_0()
+            .child(self.switch(
+                Switch::QuietHours,
+                quiet.enabled,
+                |form, on| form.quiet_hours.enabled = on,
+                cx,
+            ))
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(2)
+                    .gap(px(FIELD_GAP))
+                    .child(hour(
+                        QUIET_START_ID,
+                        "ntfy-quiet-start-field",
+                        QUIET_START_LABEL,
+                        "Start",
+                        quiet.start_hour,
+                        edited(|form, stored| form.start_hour != stored.start_hour),
+                        |quiet, hour| quiet.start_hour = hour,
+                    ))
+                    .child(hour(
+                        QUIET_END_ID,
+                        "ntfy-quiet-end-field",
+                        QUIET_END_LABEL,
+                        "End",
+                        quiet.end_hour,
+                        edited(|form, stored| form.end_hour != stored.end_hour),
+                        |quiet, hour| quiet.end_hour = hour,
+                    )),
+            )
+            .child(priority)
+    }
+
     /// A switch with its words, toggling through this form.
     fn switch(
         &self,
@@ -957,6 +1163,7 @@ impl NtfyAlerts {
             Switch::Blocked => on != stored.notify_blocked,
             Switch::ClearToken => on,
             Switch::AskAgents => on != stored.asks_agents_when_blocked(),
+            Switch::QuietHours => on != stored.quiet_hours.enabled,
         });
         let caption = super::editing::caption(label, edited.then(|| theme::palette(cx)));
         let copy = match switch {
@@ -973,6 +1180,7 @@ impl NtfyAlerts {
                 blocked_agents(),
                 cx,
             )),
+            Switch::QuietHours => card::switch_copy(caption, QUIET_NOTE, cx),
         };
         div().child(
             Checkbox::new(id, label, HoverHelp::tooltip(help), Role::Switch)
@@ -1099,10 +1307,11 @@ impl Render for NtfyAlerts {
 
         let saving = self.form.is_saving();
         let tested = self.tested.as_ref().map(|tested| match tested {
-            Ok(()) => {
+            Ok(outcome) => {
+                let line = tested_line(*outcome);
                 choices::outcome_line("ntfy-tested", Role::Status, theme::color(palette.fg_1))
-                    .aria_label("Test alert sent")
-                    .child("Test alert sent")
+                    .aria_label(line.clone())
+                    .child(line)
             }
             Err(reason) => failure("ntfy-tested".into(), reason),
         });
@@ -1265,6 +1474,7 @@ impl Render for NtfyAlerts {
                         |form, on| form.clear = on,
                         cx,
                     ),
+                    self.quiet_hours_row(palette, cx),
                     test,
                 ],
                 cx,
@@ -1391,6 +1601,66 @@ mod tests {
         assert_eq!(form.save().grace_period_secs, Some(30));
         form.grace_period_secs = 0;
         assert_eq!(form.save().grace_period_secs, Some(0));
+    }
+
+    /// Quiet hours are saved whole with the rest of the form, or a Save would put an older client's quiet hours back or
+    /// drop the user's Off. Specified: the form over the stored settings sends their quiet hours, Off included, and an
+    /// edit sends the edit.
+    #[test]
+    fn quiet_hours_are_sent_with_the_form() {
+        let stored = Settings {
+            quiet_hours: QuietHours {
+                enabled: true,
+                start_hour: 23,
+                end_hour: 6,
+                priority: None,
+            },
+            ..Settings::default()
+        };
+        let mut form = Form::over(&stored);
+        assert_eq!(form.save().quiet_hours, Some(stored.quiet_hours));
+        form.quiet_hours.start_hour = 21;
+        form.quiet_hours.priority = Some(Priority::Min);
+        assert_eq!(
+            form.save().quiet_hours,
+            Some(QuietHours {
+                start_hour: 21,
+                priority: Some(Priority::Min),
+                ..stored.quiet_hours
+            })
+        );
+    }
+
+    /// The hour selects and the priority segments are how the user reads quiet hours, and the test line is how they
+    /// learn what a test did, so their words are pinned. Specified: hours read `00:00` to `23:00`; the priorities are
+    /// Off then Min to Urgent; a test line names the priority, adds "quiet hours" inside them and the silenced wording
+    /// when they are set to Off, and is the plain "Test alert sent" from a helm that answers with no outcome.
+    #[test]
+    fn quiet_hours_words_and_the_test_line() {
+        assert_eq!(hour_label(0), "00:00");
+        assert_eq!(hour_label(7), "07:00");
+        assert_eq!(hour_label(23), "23:00");
+        let labels: Vec<&str> = quiet_priorities().map(quiet_priority_label).collect();
+        assert_eq!(labels, ["Off", "Min", "Low", "Default", "High", "Urgent"]);
+        let line = |priority, quiet_hours| {
+            tested_line(Some(TestOutcome {
+                priority,
+                quiet_hours,
+            }))
+        };
+        assert_eq!(tested_line(None), "Test alert sent");
+        assert_eq!(
+            line(Priority::Default, QuietHoursNow::Inactive),
+            "Test alert sent (Default)"
+        );
+        assert_eq!(
+            line(Priority::Low, QuietHoursNow::Active),
+            "Test alert sent (Low \u{2014} quiet hours)"
+        );
+        assert_eq!(
+            line(Priority::High, QuietHoursNow::Silenced),
+            "Test alert sent (High \u{2014} quiet hours active and set to Off; real alerts are silenced)"
+        );
     }
 
     /// English lists read "A", "A and B", "A, B and C".

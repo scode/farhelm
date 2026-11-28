@@ -175,6 +175,20 @@ impl Entry {
             (Section::Notifications, Target::Top) if self.id == ntfy::GRACE_ID => {
                 "push phone delay"
             }
+            // How someone asks for quiet hours without knowing the name: a schedule, night, do not disturb.
+            (Section::Notifications, Target::NtfySwitch(ntfy::Switch::QuietHours)) => {
+                "push phone schedule night silent mute do not disturb"
+            }
+            (Section::Notifications, Target::Top)
+                if [
+                    ntfy::QUIET_START_ID,
+                    ntfy::QUIET_END_ID,
+                    ntfy::QUIET_PRIORITY_ID,
+                ]
+                .contains(&self.id) =>
+            {
+                "push phone schedule night silent mute do not disturb quiet hours"
+            }
             (Section::Notifications, _) => "push phone",
             (Section::App, _) => "update upgrade version",
             (Section::CustomAgent(_) | Section::AddCustomAgent, _) => {
@@ -475,6 +489,37 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     Target::Top,
                 ));
                 entries.push(switch(ntfy::Switch::ClearToken));
+                // Quiet hours, drawn after the connection settings: the switch with its note, the hour selects, found
+                // by their hours' labels too, and the priority segments with their labels.
+                let (id, label, help) = ntfy::Switch::QuietHours.words();
+                entries.push(add(
+                    id,
+                    label,
+                    &[help, ntfy::QUIET_NOTE, ntfy::INTRO],
+                    Target::NtfySwitch(ntfy::Switch::QuietHours),
+                ));
+                for (id, label) in [
+                    (ntfy::QUIET_START_ID, ntfy::QUIET_START_LABEL),
+                    (ntfy::QUIET_END_ID, ntfy::QUIET_END_LABEL),
+                ] {
+                    entries.push(Entry::new(
+                        section.clone(),
+                        id,
+                        label,
+                        [ntfy::QUIET_HOURS_HELP.to_owned()]
+                            .into_iter()
+                            .chain((0..24u8).map(ntfy::hour_label)),
+                        Target::Top,
+                    ));
+                }
+                entries.push(Entry::new(
+                    section.clone(),
+                    ntfy::QUIET_PRIORITY_ID,
+                    ntfy::QUIET_PRIORITY_LABEL,
+                    std::iter::once(ntfy::QUIET_PRIORITY_HELP)
+                        .chain(ntfy::quiet_priorities().map(ntfy::quiet_priority_label)),
+                    Target::Top,
+                ));
             }
             Section::App => entries.extend([
                 add(

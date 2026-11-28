@@ -4529,7 +4529,9 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
                                "priority": "high", "token": null, "notify_waiting": true,
                                "notify_blocked": false,
                            "custom_blocked_criteria": "", "ask_agents_when_blocked": false,
-                           "grace_period_secs": 10 });
+                           "grace_period_secs": 10,
+                           "quiet_hours": { "enabled": false, "start_hour": 22, "end_hour": 7,
+                                            "priority": "low" } });
     assert_eq!(body, expected);
     assert_eq!(
         preference_work(cx),
@@ -4828,7 +4830,9 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
                            "priority": "high", "token": "browser-token", "notify_waiting": true,
                            "notify_blocked": false,
                            "custom_blocked_criteria": "", "ask_agents_when_blocked": false,
-                           "grace_period_secs": 10 });
+                           "grace_period_secs": 10,
+                           "quiet_hours": { "enabled": false, "start_hour": 22, "end_hour": 7,
+                                            "priority": "low" } });
     assert_eq!(body, form);
     assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
     let stored = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
@@ -5450,4 +5454,117 @@ pub(super) fn push_hosts(helm: &mut FakeHelm, listed: &[HostView], cx: &mut Visu
         remove: Vec::new(),
     });
     settle(cx);
+}
+
+// ---- Notifications: ntfy quiet hours -------------------------------------------------------------------------------
+
+/// Quiet hours are the point of the plan `ntfy-quiet-hours-urgency`: they must reach the helm with the rest of the
+/// form, Off as Off, and Send test must say what quiet hours did to it, since a test that arrived quietly, or at the
+/// normal priority while real alerts are silenced, would otherwise mislead. Specified: the stored settings without
+/// quiet hours show them off, from 22:00 to 07:00 at Low; turning them on, choosing 21:00 from the start select's list
+/// and Off from the priority segments marks the form unsaved, and Save sends `quiet_hours` as on, 21 to 7 with a null
+/// priority; once the helm answers with those, the form shows them saved; a Send test answered with `high` and
+/// `silenced` shows the line that real alerts are silenced, with the status role; one answered with `low` and `active`
+/// shows "Test alert sent (Low — quiet hours)"; one answered with `urgent` and `inactive`, "Test alert sent (Urgent)".
+#[gpui::test]
+fn quiet_hours_save_with_the_form_and_send_test_says_what_they_did(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "high", false),
+    );
+    into_view(cx, "ntfy-quiet-hours");
+    assert_eq!(switch_on(cx, "ntfy-quiet-hours"), Some(false));
+    assert_eq!(switch_on(cx, "ntfy-quiet-priority-Low"), Some(true));
+    let value_of = |cx: &mut VisualTestContext, id: &str| {
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .and_then(|node| node.value)
+    };
+    assert_eq!(value_of(cx, ntfy::QUIET_START_ID).as_deref(), Some("22:00"));
+    assert_eq!(value_of(cx, ntfy::QUIET_END_ID).as_deref(), Some("07:00"));
+
+    click(cx, "ntfy-quiet-hours");
+    into_view(cx, ntfy::QUIET_START_ID);
+    click(cx, ntfy::QUIET_START_ID);
+    click(cx, "ntfy-quiet-start-option-21");
+    assert_eq!(value_of(cx, ntfy::QUIET_START_ID).as_deref(), Some("21:00"));
+    into_view(cx, "ntfy-quiet-priority-Off");
+    click(cx, "ntfy-quiet-priority-Off");
+    assert_eq!(switch_on(cx, "ntfy-quiet-priority-Off"), Some(true));
+    assert_eq!(
+        label_of(cx, "ntfy-saved-state").as_deref(),
+        Some(ntfy::UNSAVED_LINE)
+    );
+    let (id, body) = save_ntfy(&mut helm, cx);
+    let quiet = json!({ "enabled": true, "start_hour": 21, "end_hour": 7, "priority": null });
+    assert_eq!(body["quiet_hours"], quiet);
+    let mut stored = ntfy("https://ntfy.sh", "alerts", "high", false);
+    stored["quiet_hours"] = quiet;
+    helm.reply(id, 200, Some(stored));
+    settle(cx);
+    assert!(!drawn(cx, NOTIFICATIONS_SAVE), "the saved form has no Save");
+    assert_eq!(switch_on(cx, "ntfy-quiet-hours"), Some(true));
+
+    for (outcome, line) in [
+        (
+            json!({ "priority": "high", "quiet_hours": "silenced" }),
+            "Test alert sent (High \u{2014} quiet hours active and set to Off; real alerts are silenced)",
+        ),
+        (
+            json!({ "priority": "low", "quiet_hours": "active" }),
+            "Test alert sent (Low \u{2014} quiet hours)",
+        ),
+        (
+            json!({ "priority": "urgent", "quiet_hours": "inactive" }),
+            "Test alert sent (Urgent)",
+        ),
+    ] {
+        reach(cx, "ntfy-send-test");
+        keys(cx, "space");
+        let sent = sent(&mut helm);
+        assert_eq!(sent.len(), 1, "one test was sent: {sent:?}");
+        helm.reply(sent[0].id, 200, Some(outcome));
+        settle(cx);
+        assert_eq!(label_of(cx, "ntfy-tested").as_deref(), Some(line));
+        let role = frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("ntfy-tested"))
+            .and_then(|node| node.role);
+        assert_eq!(role, Some(Role::Status));
+    }
+}
+
+/// The form deliberately leaves a start equal to the end to the helm's Save refusal, so that swapping 22:00–07:00 to
+/// 07:00–22:00 one select at a time never passes through a state the form refuses; a client-side block added later
+/// would pass every other test while breaking that. Specified: with quiet hours on, choosing 07:00 as the start (the
+/// end is 07:00) still offers Save, which sends both hours as 7; the helm's refusal then shows inline in its words.
+#[gpui::test]
+fn the_form_leaves_equal_quiet_hours_to_the_helms_refusal(cx: &mut TestAppContext) {
+    let refusal = "quiet hours must start and end at different hours";
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "default", false),
+    );
+    into_view(cx, "ntfy-quiet-hours");
+    click(cx, "ntfy-quiet-hours");
+    into_view(cx, ntfy::QUIET_START_ID);
+    click(cx, ntfy::QUIET_START_ID);
+    click(cx, "ntfy-quiet-start-option-7");
+    assert!(drawn(cx, NOTIFICATIONS_SAVE), "Save is still offered");
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(
+        (
+            &body["quiet_hours"]["start_hour"],
+            &body["quiet_hours"]["end_hour"]
+        ),
+        (&json!(7), &json!(7))
+    );
+    helm.reply(id, 400, Some(json!(refusal)));
+    settle(cx);
+    assert_eq!(label_of(cx, "ntfy-error").as_deref(), Some(refusal));
 }

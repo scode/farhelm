@@ -68,9 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Control ntfy urgency by schedule.** Allow controlling ntfy urgency by schedule. Plan:
-  `plans/queue/ntfy-quiet-hours-urgency.md`.
-
 ## Plan follow-ups
 
 - **Drift tests: isolate Codex's `--no-daemon` in the process-tree check.** The base drift case now checks that a shell
