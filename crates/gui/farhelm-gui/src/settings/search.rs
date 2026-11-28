@@ -171,6 +171,10 @@ impl Entry {
                 Target::NtfySwitch(ntfy::Switch::AskAgents)
                 | Target::NtfyField(ntfy::Field::Criteria),
             ) => "agent instructions",
+            // "delay" is how someone who has not met the term asks for a grace period.
+            (Section::Notifications, Target::Top) if self.id == ntfy::GRACE_ID => {
+                "push phone delay"
+            }
             (Section::Notifications, _) => "push phone",
             (Section::App, _) => "update upgrade version",
             (Section::CustomAgent(_) | Section::AddCustomAgent, _) => {
@@ -431,6 +435,16 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     label,
                     &[help, ntfy::BLOCKED_HELP, ntfy::INTRO],
                     Target::NtfySwitch(ntfy::Switch::Blocked),
+                ));
+                // The grace period, drawn under the switches, found by its note's words and its segments' labels.
+                entries.push(Entry::new(
+                    section.clone(),
+                    ntfy::GRACE_ID,
+                    ntfy::GRACE_LABEL,
+                    [ntfy::GRACE_HELP.to_owned(), ntfy::GRACE_NOTE.to_owned()]
+                        .into_iter()
+                        .chain(ntfy::GRACE_CHOICES.into_iter().map(ntfy::grace_label)),
+                    Target::Top,
                 ));
                 for field in ntfy::Field::ALL {
                     let (id, label, help) = field.words();

@@ -3194,7 +3194,19 @@ where
 #[serde(deny_unknown_fields)]
 pub struct SessionAttentionRequest {
     pub kind: SessionAttention,
+    /// How long ago, in milliseconds, the user did what this reports, when the app sends it later than that: the
+    /// desktop app's throttled interaction signal goes up to a couple of seconds after the interaction it stands for,
+    /// and the helm must count the user as aware from the interaction, not from the send, or an alert that began in
+    /// between would be withdrawn with no evidence. Absent means now (a switch, an interaction sent at once). The helm
+    /// refuses more than [`MAX_ATTENTION_AGE_MS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age_ms: Option<u32>,
 }
+
+/// The oldest attention a request may report ([`SessionAttentionRequest::age_ms`]): one minute. The desktop app's
+/// delayed signals are a few seconds old at most, so anything older comes from a broken client, and the helm refuses it
+/// rather than guess what it meant.
+pub const MAX_ATTENTION_AGE_MS: u32 = 60_000;
 
 /// What the user did that shows they are attending to a session (SPEC.md, Status).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -3203,9 +3215,11 @@ pub enum SessionAttention {
     /// The user switched to the session themselves in an active window. Clears the session's blocked mark (the
     /// agent's `farhelm agent notify`), as opening a session reads its unseen output.
     Switch,
-    /// The user clicked or scrolled inside the session while it was already open in an active window. Counts as
-    /// attention but leaves a blocked mark alone: a stray click is weaker evidence that the user has read what the
-    /// agent is blocked on than switching to it or typing into it.
+    /// The user pressed a key, clicked or scrolled inside the session while it was already open, and reading as
+    /// waiting, in an active window. Withdraws the session's ntfy alert during its grace period, but leaves a blocked
+    /// mark alone: a stray click is weaker evidence that the user has read what the agent is blocked on than switching
+    /// to it or typing into its terminal (which the helm sees as terminal input and counts on its own). The desktop app
+    /// sends it at most once every few seconds per session.
     Interaction,
 }
 
@@ -10570,7 +10584,8 @@ mod tests {
 
     /// The attention route's two kinds do different things (only a switch clears a blocked mark), so a body must name
     /// one exactly, and the desktop app and the helm must spell them alike. Specified: `switch` and `interaction`
-    /// decode and encode back to the same JSON; an unknown kind, a missing kind and an extra field are refused.
+    /// decode and encode back to the same JSON, with no age; an interaction with an age round-trips it; an unknown
+    /// kind, a missing kind and an extra field are refused.
     #[farhelm_testtrace::test]
     fn session_attention_request_names_one_known_kind() {
         for (wire, kind) in [
@@ -10579,9 +10594,13 @@ mod tests {
         ] {
             let json = serde_json::json!({"kind": wire});
             let request: SessionAttentionRequest = serde_json::from_value(json.clone()).unwrap();
-            assert_eq!(request, SessionAttentionRequest { kind });
+            assert_eq!(request, SessionAttentionRequest { kind, age_ms: None });
             assert_eq!(serde_json::to_value(request).unwrap(), json);
         }
+        let aged = serde_json::json!({"kind": "interaction", "age_ms": 1500});
+        let request: SessionAttentionRequest = serde_json::from_value(aged.clone()).unwrap();
+        assert_eq!(request.age_ms, Some(1500));
+        assert_eq!(serde_json::to_value(request).unwrap(), aged);
         for refused in [
             serde_json::json!({"kind": "glance"}),
             serde_json::json!({}),

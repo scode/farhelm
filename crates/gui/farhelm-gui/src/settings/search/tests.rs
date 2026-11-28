@@ -198,6 +198,18 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
         ("dashboard", Section::Credentials, super::tensorlake_key::ID),
         ("dashboard", Section::Tensorlake, super::tensorlake_key::ID),
         ("urgent", Section::Notifications, "ntfy-priority"),
+        // The grace period: by its name, by its segments' words, and by the plainer "delay".
+        (
+            "grace period",
+            Section::Notifications,
+            super::ntfy::GRACE_ID,
+        ),
+        ("2 min", Section::Notifications, super::ntfy::GRACE_ID),
+        (
+            "delay alerts",
+            Section::Notifications,
+            super::ntfy::GRACE_ID,
+        ),
     ] {
         let words: Vec<_> = query.split_whitespace().map(fold).collect();
         assert!(

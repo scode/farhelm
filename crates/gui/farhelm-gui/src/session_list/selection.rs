@@ -29,7 +29,12 @@
 //!   An automatic choice never says so: the session opening under the user is not evidence they looked at it. Nor does
 //!   a launch or a Replace opening its new session, which no agent can have marked yet. Choosing a session that does
 //!   not read as waiting sends nothing, so ordinary switching costs no traffic; a waiting session's switch still goes,
-//!   even when it is the session already open, since the user chose it again.
+//!   even when it is the session already open, since the user chose it again. The same signal withdraws the session's
+//!   ntfy alert during its grace period, and a switch to a session that does not read as waiting would have nothing to
+//!   withdraw: an alert is pending only for a session that is waiting or blocked, both of which read as waiting here,
+//!   and attention before an alert began does not withdraw it anyway (SPEC.md, "Ntfy alerts"). A row that has not yet
+//!   caught up with a wait the helm already saw is the one gap, and the pane's interaction signal covers it once the
+//!   row reads as waiting (`session_pane`, "Interaction is attention").
 //! - **Only the user's choice takes focus.** A click on a row ([`choose`]) hands the session and the click's mark to
 //!   the pane, whose terminal for that session then takes focus, also when the session was already open (SPEC.md,
 //!   "Where focus rests"). An automatic choice ([`open_automatically`]) does not: its terminal only becomes home, and
@@ -338,22 +343,39 @@ fn reads_waiting(key: &str, seen_as: Option<&SessionRow>, cx: &App) -> bool {
 }
 
 /// Send the `switch` attention signal for `key`, the session the user just switched to while it read as waiting, if
-/// `window` is active ([`ticker::is_active`], which honors the test bridge's override). Sent unordered, since nothing
-/// else the window sends depends on it, and best effort like the seen mark: a lost one leaves the mark until the next
-/// switch or keystroke clears it, so a failure is logged, never shown.
+/// `window` is active ([`ticker::is_active`], which honors the test bridge's override).
 fn attend(key: &str, window: &Window, cx: &mut App) {
-    if !ticker::is_active(window, cx) {
-        return;
+    if ticker::is_active(window, cx) {
+        send_attention(key, SessionAttention::Switch, None, cx);
     }
+}
+
+/// Send the attention signal `kind` for `key`, a session that read as waiting when the user switched to it (`switch`)
+/// or acted on it in the session pane (`interaction`, from `session_pane`). The caller has already checked that this
+/// happened in an active window and that the session reads as waiting; the pane's throttled signal is sent after the
+/// event, when the window may no longer be active. Sent unordered, since nothing else the window sends depends on it,
+/// and best effort like the seen mark: a lost one leaves the mark (or the alert) until the next signal or keystroke
+/// withdraws it, so a failure is logged, never shown.
+///
+/// `age` is how long ago the user acted, for a signal sent later than that (the pane's trailing interaction signal), so
+/// the helm dates the attention by the act, not the send; `None` means now.
+pub(crate) fn send_attention(
+    key: &str,
+    kind: SessionAttention,
+    age: Option<std::time::Duration>,
+    cx: &mut App,
+) {
     let path = match ApiPath::api(&["sessions", key, "attention"]) {
         Ok(path) => path,
         Err(error) => {
-            tracing::warn!(%error, "could not tell the helm the user switched to the session");
+            tracing::warn!(%error, "could not tell the helm the user attended to the session");
             return;
         }
     };
     let request = SessionAttentionRequest {
-        kind: SessionAttention::Switch,
+        kind,
+        // Saturating: an age past `u32` milliseconds is far past the helm's limit, which refuses it either way.
+        age_ms: age.map(|age| u32::try_from(age.as_millis()).unwrap_or(u32::MAX)),
     };
     operations::send_unordered(
         Method::Post,
@@ -366,7 +388,7 @@ fn attend(key: &str, window: &Window, cx: &mut App) {
             if let Err(reason) = answer {
                 tracing::warn!(
                     ?reason,
-                    "could not tell the helm the user switched to the session"
+                    "could not tell the helm the user attended to the session"
                 );
             }
         },

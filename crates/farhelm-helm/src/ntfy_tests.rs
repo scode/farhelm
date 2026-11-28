@@ -16,6 +16,18 @@ const TOPIC: &str = "private-topic-marker";
 const TOKEN: &str = "private-token-marker";
 const TITLE: &str = "private-title-marker";
 
+/// The session the delivery tests' alerts are about. Only its key matters to the sender; the alert names the title.
+const SESSION: &str = "sess-alerted";
+
+/// A waiting spell of [`SESSION`] titled [`TITLE`] that settled just now, for queueing a waiting alert directly.
+fn settled_now() -> Settled {
+    Settled {
+        id: SESSION.into(),
+        title: TITLE.into(),
+        since: Instant::now(),
+    }
+}
+
 /// Pure evidence with a distinct title makes accidental id/body substitution visible.
 fn observation(id: &str, status: SessionStatus) -> Observation {
     Observation {
@@ -456,12 +468,17 @@ fn client() -> reqwest::Client {
 }
 /// A realistic configuration with distinct private markers; changing only one
 /// field lets tests separate saved state from an unsaved request draft.
+///
+/// No grace period, so an alert goes out as soon as the sender takes it: the
+/// delivery tests here wait on a real stand-in server and must not also wait
+/// out ten seconds. The grace period has tests of its own.
 fn save(server: &str, token: Option<&str>, enabled: bool) -> SaveSettings {
     SaveSettings {
         notify_waiting: Some(true),
         notify_blocked: Some(true),
         custom_blocked_criteria: None,
         ask_agents_when_blocked: None,
+        grace_period_secs: Some(0),
         enabled,
         server_url: server.into(),
         topic: TOPIC.into(),
@@ -1001,11 +1018,13 @@ async fn blocked_alerts_follow_their_switch_and_carry_the_reason() {
         .ok()
         .unwrap();
     let host = harness.store.list_hosts().await.unwrap()[0].id;
-    harness
-        .state
-        .ntfy
-        .enqueue_blocked(TITLE.into(), host, "deploy: no credentials".into());
-    harness.state.ntfy.enqueue(TITLE.into(), host);
+    harness.state.ntfy.enqueue_blocked(
+        SessionKey::new(host, SESSION),
+        TITLE.into(),
+        "deploy: no credentials".into(),
+        Instant::now(),
+    );
+    harness.state.ntfy.enqueue(host, settled_now());
     server.arrived(1).await;
     assert_eq!(
         server
@@ -1023,10 +1042,12 @@ async fn blocked_alerts_follow_their_switch_and_carry_the_reason() {
         .await
         .ok()
         .unwrap();
-    harness
-        .state
-        .ntfy
-        .enqueue_blocked(TITLE.into(), host, "deploy: no credentials".into());
+    harness.state.ntfy.enqueue_blocked(
+        SessionKey::new(host, SESSION),
+        TITLE.into(),
+        "deploy: no credentials".into(),
+        Instant::now(),
+    );
     server.arrived(2).await;
     assert_eq!(
         server.received.lock().unwrap()[1].body,
@@ -1049,17 +1070,17 @@ async fn stalled_sender_queue_bound_and_timeout() {
         .ok()
         .unwrap();
     let host = harness.store.list_hosts().await.unwrap()[0].id;
-    harness.state.ntfy.enqueue(TITLE.into(), host);
+    harness.state.ntfy.enqueue(host, settled_now());
     server.arrived(1).await;
     assert_eq!(
         server.received.lock().unwrap()[0].body,
         format!("{TITLE} on this machine is waiting for you")
     );
     for _ in 0..QUEUE_CAPACITY {
-        harness.state.ntfy.enqueue(TITLE.into(), host);
+        harness.state.ntfy.enqueue(host, settled_now());
     }
     assert_eq!(harness.state.ntfy.0.queue.capacity(), 0);
-    harness.state.ntfy.enqueue(TITLE.into(), host);
+    harness.state.ntfy.enqueue(host, settled_now());
     assert_eq!(
         crate::test_capture::matching(&capture, "queue unavailable or full").len(),
         1
@@ -1370,4 +1391,826 @@ async fn a_blocked_alert_names_the_session_by_its_cached_title_or_else_its_id() 
             "never-listed on this machine is blocked: deploy: no credentials",
         ]
     );
+}
+
+// ---- The grace period ------------------------------------------------------------------------------------------------
+//
+// The rules are pinned on `Attention` alone with injected times, where every edge (exactly at the start, one
+// millisecond before the due time) can be named. The sender's own use of them, which reads the clock, is pinned
+// against the stand-in server on a paused clock, and the withdrawals' wiring (a cleared mark, a disconnect, a host
+// entry's removal) against a real helm.
+
+/// The grace period the rule tests hold alerts for.
+const GRACE: Duration = Duration::from_secs(10);
+
+/// An alert of `kind` about `id` on `host`, begun at `started_at`, titled "title <id>" so the alerts a test takes back
+/// say which they were.
+fn alert(host: HostId, id: &str, kind: AlertKind, started_at: Instant) -> Alert {
+    Alert {
+        key: SessionKey::new(host, id),
+        title: format!("title {id}"),
+        kind,
+        started_at,
+    }
+}
+
+/// A waiting alert about `id` on host 1.
+fn waiting(id: &str, started_at: Instant) -> Alert {
+    alert(1, id, AlertKind::Waiting, started_at)
+}
+
+/// A blocked alert about `id` on host 1, for `reason`.
+fn blocked(id: &str, reason: &str, started_at: Instant) -> Alert {
+    alert(
+        1,
+        id,
+        AlertKind::Blocked {
+            reason: reason.into(),
+        },
+        started_at,
+    )
+}
+
+/// The alerts' texts as the sender would send them on host "h", so a test reads which alerts, of which kind, came back.
+fn bodies(alerts: Vec<Alert>) -> Vec<String> {
+    alerts
+        .into_iter()
+        .map(|alert| alert.kind.body(&alert.title, "h"))
+        .collect()
+}
+
+/// The grace period exists so an alert the user would not need is never sent, which only works if it is really held
+/// until its time and then really sent. Specified: an alert taken at `t` under a 10-second grace period is held, due
+/// at `t + 10 s`; nothing is due a millisecond before that; at the due time it comes back once, and nothing is held
+/// after.
+#[farhelm_testtrace::test]
+fn an_alert_is_held_until_its_grace_period_ends() {
+    let start = Instant::now();
+    let taken = start + SETTLE;
+    let mut attention = Attention::default();
+    assert!(attention.admit(waiting("a", start), taken, GRACE).is_none());
+    let due = taken + GRACE;
+    assert_eq!(attention.next_due(), Some(due));
+    assert!(
+        attention
+            .take_due(due - Duration::from_millis(1))
+            .is_empty()
+    );
+    assert_eq!(
+        bodies(attention.take_due(due)),
+        ["title a on h is waiting for you"]
+    );
+    assert_eq!(attention.next_due(), None);
+}
+
+/// A grace period of zero is how a user keeps the old behavior, so it must not hold anything. Specified: under a zero
+/// grace period an alert comes back to be sent at once and nothing is held.
+#[farhelm_testtrace::test]
+fn a_zero_grace_period_sends_at_once() {
+    let start = Instant::now();
+    let mut attention = Attention::default();
+    let sent = attention.admit(blocked("a", "stuck", start), start, Duration::ZERO);
+    assert_eq!(
+        bodies(sent.into_iter().collect()),
+        ["title a on h is blocked: stuck"]
+    );
+    assert_eq!(attention.next_due(), None);
+}
+
+/// Attention is the evidence that the user already knows, so it must withdraw an alert whether the alert is held or
+/// still on its way: the waiting spell settles three seconds after it begins, and a user who switched to the session
+/// meanwhile must not be told about it ten seconds later. Specified: attention after a held alert began withdraws it;
+/// attention during the settling time, before the alert is even taken, drops it when it is; attention at the very
+/// moment an alert began counts; and attention withdraws both kinds for that session and nothing for another.
+#[farhelm_testtrace::test]
+fn attention_since_an_alert_began_withdraws_it() {
+    let start = Instant::now();
+    let second = Duration::from_secs(1);
+    let mut attention = Attention::default();
+    assert!(
+        attention
+            .admit(waiting("a", start), start + SETTLE, GRACE)
+            .is_none()
+    );
+    assert!(
+        attention
+            .admit(blocked("a", "stuck", start), start + SETTLE, GRACE)
+            .is_none()
+    );
+    assert!(
+        attention
+            .admit(waiting("b", start), start + SETTLE, GRACE)
+            .is_none()
+    );
+    attention.note_aware(&SessionKey::new(1, "a"), start + SETTLE + second);
+    assert_eq!(
+        bodies(attention.take_due(start + SETTLE * 10 + GRACE)),
+        ["title b on h is waiting for you"],
+        "a's held alerts were withdrawn, b's was not"
+    );
+
+    let mut attention = Attention::default();
+    attention.note_aware(&SessionKey::new(1, "a"), start + second);
+    assert!(
+        attention
+            .admit(waiting("a", start), start + SETTLE, GRACE)
+            .is_none()
+    );
+    assert_eq!(
+        attention.next_due(),
+        None,
+        "attention during the settling time dropped the alert"
+    );
+
+    let mut attention = Attention::default();
+    attention.note_aware(&SessionKey::new(1, "a"), start);
+    assert!(
+        attention
+            .admit(waiting("a", start), start + SETTLE, GRACE)
+            .is_none()
+    );
+    assert_eq!(attention.next_due(), None, "attention at the start counts");
+}
+
+/// A delayed signal reports when the user acted, and the alerts must take that time, not the arrival's: an alert that
+/// began after the interaction but before its signal arrived is not something the user saw. Specified: with two
+/// alerts held, one begun before the interaction and one after it, attention noted at the interaction's time
+/// withdraws only the first; a delayed record older than the session's latest one does not move that record back.
+#[farhelm_testtrace::test]
+fn attention_dated_in_the_past_withdraws_only_what_began_by_then() {
+    let start = Instant::now();
+    let acted = start + Duration::from_secs(1);
+    let arrived = acted + Duration::from_secs(2);
+    let mut attention = Attention::default();
+    assert!(
+        attention
+            .admit(waiting("a", start), arrived, GRACE)
+            .is_none()
+    );
+    let begun_after = acted + Duration::from_millis(500);
+    assert!(
+        attention
+            .admit(blocked("a", "stuck", begun_after), arrived, GRACE)
+            .is_none()
+    );
+    attention.note_aware(&SessionKey::new(1, "a"), acted);
+    assert_eq!(
+        bodies(attention.take_due(arrived + GRACE)),
+        ["title a on h is blocked: stuck"],
+        "the alert begun between the interaction and its signal stays"
+    );
+    attention.note_aware(&SessionKey::new(1, "a"), arrived);
+    attention.note_aware(&SessionKey::new(1, "a"), acted);
+    assert_eq!(
+        attention.last_aware.get(&SessionKey::new(1, "a")),
+        Some(&arrived),
+        "an older record does not replace a newer one"
+    );
+}
+
+/// Attention is about what the user has seen, so attention before something began cannot mean they saw it: the user
+/// who typed into a session a minute ago must still hear that it now waits. Specified: attention one second before an
+/// alert began leaves it held, and it is sent at its due time.
+#[farhelm_testtrace::test]
+fn attention_before_an_alert_began_does_not_withdraw_it() {
+    let aware = Instant::now();
+    let start = aware + Duration::from_secs(1);
+    let mut attention = Attention::default();
+    attention.note_aware(&SessionKey::new(1, "a"), aware);
+    assert!(
+        attention
+            .admit(waiting("a", start), start + SETTLE, GRACE)
+            .is_none()
+    );
+    assert_eq!(
+        bodies(attention.take_due(start + SETTLE + GRACE)),
+        ["title a on h is waiting for you"]
+    );
+}
+
+/// An alert about something that is over would be a false alarm, and the withdrawal may reach the sender before the
+/// alert does. Specified: withdrawing a session's waiting alert leaves its blocked one, and the other way round;
+/// withdrawing a host's alerts leaves another host's, and withdrawing only its waiting alerts (a connection's end)
+/// leaves its blocked ones, held or queued; a withdrawal recorded before an alert is taken drops that alert
+/// when it began before the withdrawal, and holds it when it began after (the session's next wait, the host's next
+/// connection).
+#[farhelm_testtrace::test]
+fn withdrawals_cancel_their_own_alerts_held_or_queued() {
+    let start = Instant::now();
+    let later = start + Duration::from_secs(1);
+    let far = start + SETTLE * 10 + GRACE * 10;
+    let key = SessionKey::new(1, "a");
+
+    let mut attention = Attention::default();
+    assert!(attention.admit(waiting("a", start), start, GRACE).is_none());
+    assert!(
+        attention
+            .admit(blocked("a", "stuck", start), start, GRACE)
+            .is_none()
+    );
+    attention.cancel(&key, Kind::Waiting, later);
+    assert_eq!(
+        bodies(attention.take_due(far)),
+        ["title a on h is blocked: stuck"],
+        "leaving Waiting withdraws only the waiting alert"
+    );
+
+    let mut attention = Attention::default();
+    assert!(attention.admit(waiting("a", start), start, GRACE).is_none());
+    assert!(
+        attention
+            .admit(blocked("a", "stuck", start), start, GRACE)
+            .is_none()
+    );
+    attention.cancel(&key, Kind::Blocked, later);
+    assert_eq!(
+        bodies(attention.take_due(far)),
+        ["title a on h is waiting for you"],
+        "a cleared mark withdraws only the blocked alert"
+    );
+
+    let mut attention = Attention::default();
+    assert!(attention.admit(waiting("a", start), start, GRACE).is_none());
+    assert!(
+        attention
+            .admit(alert(2, "z", AlertKind::Waiting, start), start, GRACE)
+            .is_none()
+    );
+    attention.cancel_host(1, &[Kind::Waiting, Kind::Blocked], later);
+    assert_eq!(
+        bodies(attention.take_due(far)),
+        ["title z on h is waiting for you"],
+        "a host's withdrawal leaves another host's alerts"
+    );
+
+    let mut attention = Attention::default();
+    assert!(attention.admit(waiting("a", start), start, GRACE).is_none());
+    assert!(
+        attention
+            .admit(blocked("a", "stuck", start), start, GRACE)
+            .is_none()
+    );
+    attention.cancel_host(1, &[Kind::Waiting], later);
+    assert!(
+        attention
+            .admit(blocked("b", "queued", start), later, GRACE)
+            .is_none()
+    );
+    let mut sent = bodies(attention.take_due(far));
+    sent.sort();
+    assert_eq!(
+        sent,
+        [
+            "title a on h is blocked: stuck",
+            "title b on h is blocked: queued"
+        ],
+        "a connection's end withdraws only waiting alerts, held or queued"
+    );
+
+    let mut attention = Attention::default();
+    attention.cancel(&key, Kind::Blocked, later);
+    attention.cancel_host(2, &[Kind::Waiting, Kind::Blocked], later);
+    assert!(
+        attention
+            .admit(blocked("a", "stuck", start), later, GRACE)
+            .is_none()
+    );
+    assert!(
+        attention
+            .admit(alert(2, "z", AlertKind::Waiting, start), later, GRACE)
+            .is_none()
+    );
+    assert_eq!(
+        attention.next_due(),
+        None,
+        "both were withdrawn in the queue"
+    );
+    let next = later + Duration::from_secs(1);
+    assert!(
+        attention
+            .admit(blocked("a", "again", next), next, GRACE)
+            .is_none()
+    );
+    assert!(
+        attention
+            .admit(alert(2, "z", AlertKind::Waiting, next), next, GRACE)
+            .is_none()
+    );
+    assert_eq!(
+        bodies(attention.take_due(far)).len(),
+        2,
+        "what began after the withdrawals is held as usual"
+    );
+}
+
+/// An agent can report blocked several times in a row; each report must not restart the wait or send twice.
+/// Specified: a second blocked alert for a session already holding one keeps the first's due time and replaces its
+/// reason, and only one comes back; one taken after the grace period was turned off goes at once and leaves nothing
+/// held.
+#[farhelm_testtrace::test]
+fn a_repeated_alert_keeps_its_due_time_and_sends_once() {
+    let start = Instant::now();
+    let mut attention = Attention::default();
+    assert!(
+        attention
+            .admit(blocked("a", "first", start), start, GRACE)
+            .is_none()
+    );
+    let again = start + Duration::from_secs(5);
+    assert!(
+        attention
+            .admit(blocked("a", "second", again), again, GRACE)
+            .is_none()
+    );
+    assert_eq!(attention.next_due(), Some(start + GRACE));
+    assert_eq!(
+        bodies(attention.take_due(start + GRACE)),
+        ["title a on h is blocked: second"]
+    );
+
+    assert!(
+        attention
+            .admit(blocked("a", "held", start), start, GRACE)
+            .is_none()
+    );
+    assert!(
+        attention
+            .admit(blocked("a", "now", again), again, Duration::ZERO)
+            .is_some()
+    );
+    assert_eq!(
+        attention.next_due(),
+        None,
+        "sent at once after the grace period was turned off, it replaces the held one"
+    );
+}
+
+/// Every session the user ever attends to would otherwise leave a record for the helm's whole life. Specified: past
+/// the prune threshold, records older than the horizon go and the fresh one stays; under the threshold, old records
+/// stay; a prune that frees nothing doubles the threshold, so a keystroke does not scan every fresh record.
+#[farhelm_testtrace::test]
+fn withdrawal_records_are_bounded() {
+    let start = Instant::now();
+    let mut attention = Attention::default();
+    for n in 0..RECORDS_PRUNE_AT {
+        attention.note_aware(&SessionKey::new(1, format!("s{n}")), start);
+    }
+    assert_eq!(
+        attention.last_aware.len(),
+        RECORDS_PRUNE_AT,
+        "nothing is pruned at the threshold"
+    );
+    let fresh = SessionKey::new(1, "fresh");
+    let now = start + RECORD_HORIZON;
+    attention.note_aware(&fresh, now);
+    assert_eq!(attention.last_aware.keys().collect::<Vec<_>>(), [&fresh]);
+
+    // A prune that frees nothing moves the threshold up, so the next records do not each scan them all again.
+    for n in 0..RECORDS_PRUNE_AT {
+        attention.note_aware(&SessionKey::new(1, format!("t{n}")), now);
+    }
+    assert_eq!(attention.records(), RECORDS_PRUNE_AT + 1);
+    assert_eq!(attention.prune_at, (RECORDS_PRUNE_AT + 1) * 2);
+}
+
+/// The host refresh withdraws a held waiting alert from what the policy reports as ended, so every way a spell ends
+/// must be reported. Specified: a spell ends when its session reads as something other than Waiting or Unknown, when
+/// it leaves the listing, and when waiting alerts are turned off; an Unknown reading ends nothing; each end is
+/// reported once.
+#[farhelm_testtrace::test]
+fn the_policy_reports_every_spell_that_ended() {
+    let now = Instant::now();
+    let mut policy = Policy::default();
+    assert!(policy.observe(&[], now, true).is_empty());
+    let list = [
+        observation("a", SessionStatus::Waiting),
+        observation("b", SessionStatus::Waiting),
+        observation("c", SessionStatus::Waiting),
+    ];
+    assert!(policy.observe(&list, now, true).is_empty());
+    assert_eq!(policy.take_ended(), Vec::<String>::new());
+    let next = [
+        observation("a", SessionStatus::Running),
+        observation("c", SessionStatus::Unknown),
+    ];
+    assert!(policy.observe(&next, now + SETTLE, true).is_empty());
+    let mut ended = policy.take_ended();
+    ended.sort();
+    assert_eq!(ended, ["a", "b"], "a left Waiting and b left the listing");
+    assert_eq!(policy.take_ended(), Vec::<String>::new(), "reported once");
+    assert!(policy.observe(&next, now + SETTLE, false).is_empty());
+    assert_eq!(
+        policy.take_ended(),
+        ["c"],
+        "turning alerts off ends c's spell"
+    );
+}
+
+/// The grace period is a stored setting with a bound, and an older client's save must not reset it. Specified: a save
+/// naming 600 seconds stores it; one naming 601 is refused with a fixed message; a save that leaves it out keeps the
+/// stored one; a configuration that never chose one reads as the 10-second default.
+#[farhelm_testtrace::test]
+fn the_grace_period_saves_within_its_bound() {
+    let previous = Config {
+        settings: Settings::default(),
+        token: None,
+    };
+    assert_eq!(
+        previous.settings.grace_period_secs,
+        farhelm_proto::ntfy::DEFAULT_GRACE_PERIOD_SECS
+    );
+    let with = |secs: Option<u32>| SaveSettings {
+        grace_period_secs: secs,
+        ..save("https://ntfy.sh", None, true)
+    };
+    let saved = Config::saved(previous.clone(), with(Some(600))).unwrap();
+    assert_eq!(saved.settings.grace_period_secs, 600);
+    assert_eq!(
+        Config::saved(previous.clone(), with(Some(601))).err(),
+        Some("the grace period must be at most 600 seconds")
+    );
+    let kept = Config::saved(saved, with(None)).unwrap();
+    assert_eq!(kept.settings.grace_period_secs, 600);
+}
+
+/// The stored grace period must survive the database and come back through the route, or the Settings card would
+/// show and resend a value the helm does not hold. Specified: saving 45 seconds through `PUT /api/ntfy-alerts` answers
+/// 45, and the next `GET` answers 45; a `PUT` naming 601 is refused with 400 and leaves 45 stored.
+#[farhelm_testtrace::test]
+async fn the_grace_period_round_trips_through_the_route() {
+    let harness = helm().await;
+    let mut body = serde_json::to_value(save("https://ntfy.sh", None, true)).unwrap();
+    body["grace_period_secs"] = 45.into();
+    let response = harness
+        .router()
+        .oneshot(request("PUT", "/api/ntfy-alerts", body.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let answered: serde_json::Value = serde_json::from_str(&text(response).await).unwrap();
+    assert_eq!(answered["grace_period_secs"], 45);
+    body["grace_period_secs"] = 601.into();
+    let response = harness
+        .router()
+        .oneshot(request("PUT", "/api/ntfy-alerts", body))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response = harness
+        .router()
+        .oneshot(request("GET", "/api/ntfy-alerts", serde_json::Value::Null))
+        .await
+        .unwrap();
+    let read: serde_json::Value = serde_json::from_str(&text(response).await).unwrap();
+    assert_eq!(read["grace_period_secs"], 45);
+}
+
+/// Save `grace` as the grace period on the stand-in at `server`, with every alert switched on.
+async fn save_grace(harness: &Harness, server: &StandIn, grace: Duration) {
+    let config = SaveSettings {
+        grace_period_secs: Some(u32::try_from(grace.as_secs()).unwrap()),
+        ..save(&server.server_url, Some(TOKEN), true)
+    };
+    harness.store.save_ntfy_config(config).await.ok().unwrap();
+}
+
+/// Wait until the sender has taken and decided `count` alerts in all, so a test acts on a held alert only once it is
+/// held. Real time: the sender reads the settings from the database before deciding.
+async fn taken(harness: &Harness, count: u64) {
+    let mut taken = harness.state.ntfy.0.taken.clone();
+    tokio::time::timeout(Duration::from_secs(10), taken.wait_for(|n| *n >= count))
+        .await
+        .expect("the sender did not take the alert")
+        .expect("the sender is gone");
+}
+
+/// Whether the sender holds an alert of `kind` for `id` on `host` now.
+fn holds(harness: &Harness, host: HostId, id: &str, kind: Kind) -> bool {
+    harness
+        .state
+        .ntfy
+        .attention()
+        .held
+        .contains_key(&(SessionKey::new(host, id), kind))
+}
+
+/// A grace period no wiring test can live through: an alert that leaves the held map during one was withdrawn, not
+/// sent, which the stand-in receiving nothing confirms.
+fn unreachable_grace() -> Duration {
+    Duration::from_secs(u64::from(farhelm_proto::ntfy::MAX_GRACE_PERIOD_SECS))
+}
+
+/// Assert the stand-in received no alert at all.
+fn nothing_sent(server: &StandIn) {
+    assert_eq!(
+        server
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.body.clone())
+            .collect::<Vec<_>>(),
+        Vec::<String>::new(),
+        "an alert was sent"
+    );
+}
+
+/// The sender must really sleep until a held alert is due and then send it, with nothing else waking it: the user
+/// relies on the alert arriving even when nothing else happens in the fleet. Specified, on a paused clock: a waiting
+/// alert queued under a 10-second grace period is held and unsent; nine seconds on it is still held; past ten it is
+/// sent, with the usual text.
+#[farhelm_testtrace::test]
+async fn the_sender_sends_a_held_alert_when_it_is_due() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    save_grace(&harness, &server, GRACE).await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.state.ntfy.enqueue(host, settled_now());
+    taken(&harness, 1).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting),
+        "the premise: it is held"
+    );
+    tokio::time::pause();
+    tokio::time::advance(GRACE - Duration::from_secs(1)).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting) && server.received.lock().unwrap().is_empty(),
+        "still held a second before its due time"
+    );
+    tokio::time::advance(Duration::from_secs(2)).await;
+    tokio::time::resume();
+    server.arrived(1).await;
+    assert_eq!(
+        server.received.lock().unwrap()[0].body,
+        format!("{TITLE} on this machine is waiting for you")
+    );
+}
+
+/// The point of the grace period: an alert the user made unnecessary by attending to the session is never sent. The
+/// sender handles the queue in order, so an alert queued after the withdrawal, once the period is past, arriving first
+/// shows the withdrawn one was not sent. Specified, on a paused clock: a held waiting alert, then attention to its
+/// session, then the clock past its due time: nothing is held, and the next arrival is a later alert for another
+/// session.
+#[farhelm_testtrace::test]
+async fn attention_keeps_a_held_alert_from_being_sent() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    save_grace(&harness, &server, GRACE).await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.state.ntfy.enqueue(host, settled_now());
+    taken(&harness, 1).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting),
+        "the premise: it is held"
+    );
+    harness
+        .state
+        .ntfy
+        .note_attention(&SessionKey::new(host, SESSION));
+    assert!(!holds(&harness, host, SESSION, Kind::Waiting));
+    tokio::time::pause();
+    tokio::time::advance(GRACE * 2).await;
+    tokio::time::resume();
+    save_grace(&harness, &server, Duration::ZERO).await;
+    harness.state.ntfy.enqueue(
+        host,
+        Settled {
+            id: "other".into(),
+            title: "other title".into(),
+            since: Instant::now(),
+        },
+    );
+    server.arrived(1).await;
+    assert_eq!(
+        server
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.body.clone())
+            .collect::<Vec<_>>(),
+        ["other title on this machine is waiting for you"]
+    );
+}
+
+/// A cleared blocked mark means the agent's report is over, whichever path cleared it, so its alert must be withdrawn
+/// through the one exit every clear takes. Specified: an agent's report on a session marks it and holds its blocked
+/// alert; clearing the mark through `attention::clear` withdraws it, and nothing was sent.
+#[farhelm_testtrace::test]
+async fn a_cleared_mark_withdraws_its_held_blocked_alert() {
+    let server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    save_grace(&harness, &server, unreachable_grace()).await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    let key = SessionKey::new(host, SESSION);
+    harness.store.mark_blocked(&key).await.unwrap();
+    harness
+        .state
+        .ntfy
+        .enqueue_blocked(key.clone(), TITLE.into(), "stuck".into(), Instant::now());
+    taken(&harness, 1).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Blocked),
+        "the premise: it is held"
+    );
+    assert!(
+        crate::attention::clear(
+            &harness.store,
+            harness.manager.events(),
+            &harness.state.ntfy,
+            &key
+        )
+        .await
+        .unwrap(),
+        "the premise: the mark was there"
+    );
+    assert!(!holds(&harness, host, SESSION, Kind::Blocked));
+    nothing_sent(&server);
+}
+
+/// A host whose connection ended can no longer say whether its sessions still wait, and the next connection starts a
+/// fresh baseline, so nothing would ever end a spell the old connection settled. A blocked mark is durable, though, and
+/// the agent is still blocked, so a connection blip must not cost the user that alert. Specified: with a held waiting
+/// alert and a held blocked alert for a session on a connected host, once its connection drops and the host has
+/// reconnected, the waiting alert is withdrawn, the blocked one is still held, and nothing was sent.
+#[farhelm_testtrace::test]
+async fn a_disconnect_withdraws_only_its_hosts_held_waiting_alerts() {
+    let server = stand_in(Answer::Success).await;
+    let harness = FleetBuilder::new()
+        .await
+        .ntfy_client(client())
+        .local(HostScript {
+            identity: Some("grace-local".to_string()),
+            sessions: vec![session(SESSION, 1)],
+            ..HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.await_refreshed(host).await;
+    let incarnation = harness.manager.status(host).unwrap().incarnation;
+    save_grace(&harness, &server, unreachable_grace()).await;
+    let key = SessionKey::new(host, SESSION);
+    harness.store.mark_blocked(&key).await.unwrap();
+    harness.state.ntfy.enqueue(host, settled_now());
+    harness
+        .state
+        .ntfy
+        .enqueue_blocked(key, TITLE.into(), "stuck".into(), Instant::now());
+    taken(&harness, 2).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting)
+            && holds(&harness, host, SESSION, Kind::Blocked),
+        "the premise: both are held"
+    );
+    harness.fleet.kill_connection(host);
+    harness.await_refreshed_after(host, incarnation).await;
+    assert!(!holds(&harness, host, SESSION, Kind::Waiting));
+    assert!(
+        holds(&harness, host, SESSION, Kind::Blocked),
+        "the blocked alert outlives the connection"
+    );
+    nothing_sent(&server);
+}
+
+/// The host refresh withdraws a held waiting alert once the session stops waiting, through the spells the waiting
+/// policy reports as ended; a refactor that moved that step out of the observation would leave such alerts to go out.
+/// Specified: with waiting alerts on and a session already waiting at the baseline, a held waiting alert for it is
+/// withdrawn by the refresh that reads it running, and nothing was sent.
+#[farhelm_testtrace::test]
+async fn a_refresh_that_reads_a_session_no_longer_waiting_withdraws_its_alert() {
+    let server = stand_in(Answer::Success).await;
+    let mut waiting_session = session(SESSION, 1);
+    waiting_session.status = SessionStatus::Waiting;
+    let harness = FleetBuilder::new()
+        .await
+        .ntfy_client(client())
+        .local(HostScript {
+            identity: Some("grace-refresh".to_string()),
+            sessions: vec![waiting_session],
+            ..HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.await_refreshed(host).await;
+    save_grace(&harness, &server, unreachable_grace()).await;
+    // The first listing after alerts come on is the waiting baseline; the session is in it, waiting, so the policy
+    // tracks it and reports its spell's end.
+    harness.refresh_to_completion(host).await;
+    harness.state.ntfy.enqueue(host, settled_now());
+    taken(&harness, 1).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting),
+        "the premise: it is held"
+    );
+    harness.fleet.edit(host, |script| {
+        script.sessions[0].status = SessionStatus::Running;
+    });
+    harness.refresh_to_completion(host).await;
+    assert!(!holds(&harness, host, SESSION, Kind::Waiting));
+    nothing_sent(&server);
+}
+
+/// Removing a host entry aborts its connection without its own teardown, and its blocked marks go by the database's
+/// cascade rather than through `attention::cleared_marks`, so the removal must withdraw the host's alerts itself.
+/// Specified: a held alert for a session on an ssh host is withdrawn when the host's entry is removed, a held alert on
+/// another host stays, and nothing was sent.
+#[farhelm_testtrace::test]
+async fn removing_a_host_withdraws_its_held_alerts() {
+    let server = stand_in(Answer::Success).await;
+    let (builder, remote) = FleetBuilder::new()
+        .await
+        .ntfy_client(client())
+        .ssh(
+            "grace-remote.example",
+            HostScript {
+                identity: Some("grace-remote".to_string()),
+                sessions: vec![session(SESSION, 1)],
+                ..HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = crate::rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(remote).await;
+    save_grace(&harness, &server, unreachable_grace()).await;
+    harness.state.ntfy.enqueue(remote, settled_now());
+    harness.state.ntfy.enqueue(local, settled_now());
+    taken(&harness, 2).await;
+    assert!(
+        holds(&harness, remote, SESSION, Kind::Waiting)
+            && holds(&harness, local, SESSION, Kind::Waiting),
+        "the premise: both are held"
+    );
+    let response = crate::hosts::remove_host(
+        axum::extract::State(Arc::clone(&harness.state)),
+        axum::extract::Path(remote),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!holds(&harness, remote, SESSION, Kind::Waiting));
+    assert!(
+        holds(&harness, local, SESSION, Kind::Waiting),
+        "another host's alert stays"
+    );
+    nothing_sent(&server);
+}
+
+/// The attention route dates an interaction by the age the desktop app reports, so a delayed signal withdraws only
+/// what began before the user acted, and refuses an age no honest client sends. Specified: with a waiting alert held
+/// for a listed session, an interaction aged 30 seconds (before the alert began) leaves it held; one aged over a
+/// minute is refused with 400 and leaves it held; one with no age withdraws it; nothing was sent.
+#[farhelm_testtrace::test]
+async fn an_aged_interaction_withdraws_only_what_began_before_it() {
+    let server = stand_in(Answer::Success).await;
+    let harness = FleetBuilder::new()
+        .await
+        .ntfy_client(client())
+        .local(HostScript {
+            identity: Some("grace-aged".to_string()),
+            sessions: vec![session(SESSION, 1)],
+            ..HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.await_refreshed(host).await;
+    save_grace(&harness, &server, unreachable_grace()).await;
+    harness.state.ntfy.enqueue(host, settled_now());
+    taken(&harness, 1).await;
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting),
+        "the premise: it is held"
+    );
+    let path = format!(
+        "/api/sessions/{}/attention",
+        harness.session_ref(host, SESSION)
+    );
+    let post = |body: serde_json::Value| harness.router().oneshot(request("POST", &path, body));
+    let response = post(serde_json::json!({"kind": "interaction", "age_ms": 30_000}))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        holds(&harness, host, SESSION, Kind::Waiting),
+        "attention from before the alert began withdraws nothing"
+    );
+    let response = post(serde_json::json!({
+        "kind": "interaction",
+        "age_ms": farhelm_proto::MAX_ATTENTION_AGE_MS + 1
+    }))
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(holds(&harness, host, SESSION, Kind::Waiting));
+    let response = post(serde_json::json!({"kind": "interaction"}))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!holds(&harness, host, SESSION, Kind::Waiting));
+    nothing_sent(&server);
 }

@@ -6295,17 +6295,21 @@ installation it is on, so it follows an open session the sidebar's filter hides
   listing is not truncated, one it no longer contains. The terminal path reads only a frame's tag and mouse fields, and
   hands the clear to a task of its own, one at a time per session and at most every five seconds after a failure, so
   typing never waits on the database. Every removal, including the cap's evictions, ends in `attention::cleared_marks`,
-  which bumps the fleet-events revision and is the one place for anything else that must follow it, except a host
-  entry's removal, whose rows cascade away without passing through it; per-session state hung on `cleared_marks` must
-  also be dropped when its host goes.
+  which bumps the fleet-events revision and withdraws the session's held blocked alert ("Ntfy waiting alerts"), and is
+  the one place for anything else that must follow it, except a host entry's removal, whose rows cascade away without
+  passing through it; per-session state hung on `cleared_marks` must also be dropped when its host goes, which for the
+  alerts the two paths that abort a removed host's actor do (`ConnectionManager::stop_actor` and the registry reconcile,
+  through `Alerts::cancel_host`).
 
-  `POST /api/sessions/{id}/attention` takes `{"kind": "switch" | "interaction"}`; like the seen route it resolves
-  ownership without contacting the host, and a switch clears the mark while an interaction does not. Unlike the seen
-  route it accepts a retired containerized session (SPEC.md, "Retired containerized sessions"): such a session's
-  terminal cannot be opened and Stop is refused, so a switch is the only way to clear its mark short of Delete. Both
-  kinds, and each counted terminal input frame, go to the ntfy sender's awareness hook (`Alerts::note_attention`), which
-  records nothing yet. The 104→105 step creates the table and deletes the `agent_blocked` notices that the mark
-  replaced, without rebuilding `notices`, whose constraint still admits the retired kind; notice reads skip it.
+  `POST /api/sessions/{id}/attention` takes `{"kind": "switch" | "interaction"}`, with an optional `age_ms` (how long
+  ago the user acted, at most a minute, refused beyond) that dates the awareness it records; the route is helm-local, so
+  the field needs no protocol bump; like the seen route it resolves ownership without contacting the host, and a switch
+  clears the mark while an interaction does not. Unlike the seen route it accepts a retired containerized session
+  (SPEC.md, "Retired containerized sessions"): such a session's terminal cannot be opened and Stop is refused, so a
+  switch is the only way to clear its mark short of Delete. Both kinds, and each counted terminal input frame, go to the
+  ntfy sender's awareness hook (`Alerts::note_attention`), which withdraws the session's alerts during their grace
+  period ("Ntfy waiting alerts"). The 104→105 step creates the table and deletes the `agent_blocked` notices that the
+  mark replaced, without rebuilding `notices`, whose constraint still admits the retired kind; notice reads skip it.
 
   The desktop app reads the mark through the same `SessionRow::effectively_waiting` and nowhere else: the row's live
   mark (`session_list/status.rs::live`, which every surface that draws a status asks, the collapsed group's mark
@@ -6316,7 +6320,21 @@ installation it is on, so it follows an open session the sidebar's filter hides
   (`selection::switch_to`: a row's click or keyboard press, a quick switcher pick), never from an automatic choice or a
   launch or Replace opening its new session, only while `ticker::is_active` says the window is active, and only for a
   row that reads as waiting, so ordinary switching sends nothing. It travels the UI channel's unordered lane as an
-  ordinary router command (no typed command API), best effort like the seen mark.
+  ordinary router command (no typed command API), best effort like the seen mark. A switch to a row that does not read
+  as waiting would withdraw nothing: an alert is held only for a session that is waiting or blocked, and awareness
+  before an alert's start does not count. The `interaction` signal comes from the session pane's passive listeners
+  (`session_pane.rs`, "Interaction is attention"): a key-down captured on the pane's root, so only keys whose focus is
+  inside it count, and pointer presses and wheel steps seen window-wide in the capture phase (the terminal's wheel
+  handler stops propagation) but counted only when a hitbox the pane draws over itself, last, is hovered (for a scroll,
+  would handle it), which keeps out events elsewhere and under a dialog. It is sent only while the window is active and
+  the open row reads as waiting, and is throttled per session to one every two seconds on a trailing edge: a throttled
+  interaction schedules one send for its session at the end of the gap instead of being dropped, and that send checks
+  only that the session still reads as waiting, since the interaction it stands for already passed the window and
+  open-session checks. A withdrawal is therefore delayed, not swallowed by the throttle (dropped only if the session no
+  longer reads as waiting, with nothing left to withdraw), and stays well inside the shortest grace period the Settings
+  card offers. The trailing send carries the age of the latest interaction it stands for, and the helm records the
+  awareness at receipt minus that age, withdrawing only what began by then, so an alert that began between the
+  interaction and the send is not withdrawn by evidence the user never gave.
 
 - Shared pins live in `session_pins`, keyed by `(host_id, session_id)` since helm schema 63, with a NOT NULL signed
   `position` since schema 74. The 73→74 step rebuilds the presence-only table using the same DDL as fresh creation,
@@ -6433,6 +6451,34 @@ no redirects and no retries. Failure reasons are fixed words or an HTTP status; 
 and their cause chains are never displayed. The ntfy response body is ignored. No diagnostic includes the topic, token
 or title. Dropping the final sender handle aborts the owned task; it holds no handle back to itself or the manager.
 Test-built helms default offline and inject a loopback client only for alert tests.
+
+The grace period lives inside that one sender task, outside the queue. `Attention`, behind a mutex the task shares with
+every `Alerts` handle, holds the alerts waiting out their grace period, one per session and kind, and, with times, the
+withdrawals: the user's last attention per session (`note_attention`), a session's spell ending or mark clearing per
+session and kind (`cancel_waiting` from the policy's ended spells after each observation, `cancel_blocked` from
+`attention::cleared_marks`), and per host and kind a host's connection ending (the end of `serve`; waiting alerts only,
+`cancel_host_waiting`) or entry being removed (`stop_actor` or the registry reconcile, which abort its actor before
+`serve` can end; both kinds, `cancel_host`). Only waiting alerts go with a connection, because only their evidence is
+connection-local: the next connection's first listing is a fresh baseline, so a session still waiting then would never
+end its spell. A blocked mark is durable, and the reconnected refresh clears it, withdrawing its alert, only if its
+session is really over. The cost is a blip window: a connection that drops and comes back while a waiting alert is in
+its grace period loses that alert for a session still waiting, since the reconnect baselines it as already handled.
+Before the grace period that window was the 3-second settling time; it is now that plus the grace period. Each queued
+alert carries its start, the spell's first Waiting reading or the agent's report (read before the mark is written, so a
+switch prompted by the mark's own push counts as attention after the report). When the sender takes it, it re-reads the
+settings, drops it if a withdrawal record is at or after that start, sends it at once under a zero grace period, and
+otherwise holds it until `now + grace` (a repeat for the same session and kind replaces the content and keeps the
+earlier due time). The task's `select!` races the queue against a sleep to the earliest due time, recomputed each pass;
+only the task adds held alerts, so that time can only move later behind its back, and nothing needs waking. At the due
+time it re-reads the settings (a switch turned off meanwhile drops the alert), then the rate window and the host name
+apply as for any send. Withdrawals take only the lock, never the queue, so they cannot wait behind queued alerts or be
+lost to a full queue, and they are remembered because the alert they are meant for may still be queued: attention during
+the 3-second settling time comes before the alert exists, and a session can leave Waiting between its alert's try-send
+and the sender taking it. Comparing with the start keeps a withdrawal from reaching a later spell or report. Records
+older than an hour are pruned once there are more than 256, and after a prune the threshold becomes twice what is left
+(never below 256), so a fleet with many fresh records does not scan them on every keystroke's `note_attention`.
+`grace_period_secs` is a `u32` in the same singleton, defaulting to 10 when absent (configurations saved before it
+existed), kept when a save omits it, and refused above 600 with a fixed message.
 
 Blocked alerts share that queue, sender and rate window as a second alert kind. `farhelm agent notify` relays
 `AgentVerb::Notify` (protocol 93) over the authenticated agent relay. It is not a mutating verb, so it takes no session

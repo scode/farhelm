@@ -1,7 +1,7 @@
 //! Settings → Notifications, its two helm-configured cards: **Blocked agents** (whether the agents Farhelm starts are
 //! asked to run `farhelm agent notify` when they are blocked, and what counts as blocked) and **ntfy alerts** (whether
-//! the helm sends an alert when a session waits for the user or says it is blocked, and the ntfy server, topic, access
-//! token and priority it sends with).
+//! the helm sends an alert when a session waits for the user or says it is blocked, how long it holds an alert back in
+//! case the user attends to the session first, and the ntfy server, topic, access token and priority it sends with).
 //!
 //! Both cards are one form over one helm configuration: the instruction choice is stored with the ntfy settings
 //! (`farhelm_proto::ntfy::Settings::ask_agents_when_blocked`), so it shares their read, their one Save and their
@@ -86,6 +86,41 @@ pub(super) const TOKEN_HELP: &str =
 pub(super) const TOKEN_CLEAR_HELP: &str = "The saved access token will be cleared when you save";
 pub(super) const TOKEN_CHANGED_HELP: &str =
     "Optional token for this server; leaving it blank clears the previous server's saved token";
+/// The grace period segments' id, shared with Settings search; each segment is drawn under `ntfy-grace-<its label>`.
+pub(super) const GRACE_ID: &str = "ntfy-grace";
+/// The grace period segments' caption.
+pub(super) const GRACE_LABEL: &str = "Grace period";
+/// The grace period segments' hover help, which every segment repeats, as the priority segments do.
+pub(super) const GRACE_HELP: &str = "How long an alert waits before it is sent; Save applies it";
+/// What the grace period does, under its segments: the per-session awareness rule (SPEC.md, "Ntfy alerts") in the
+/// user's terms. Window focus is deliberately not in it, since focus alone withdraws nothing.
+pub(super) const GRACE_NOTE: &str = "An alert waits this long before it is sent. It is not sent if you switch to the \
+     session, type, click or scroll in it, or it stops waiting first. Off sends alerts at once.";
+/// The grace periods offered, in seconds, shortest first: Off, then a few steps up to two minutes. The helm takes up
+/// to ten minutes (`farhelm_proto::ntfy::MAX_GRACE_PERIOD_SECS`); a stored value not in this list is offered as an
+/// extra segment ([`grace_choices`]), so the form never shows nothing chosen.
+pub(super) const GRACE_CHOICES: [u32; 6] = [0, 5, 10, 30, 60, 120];
+
+/// The segment label for a grace period of `secs`: "Off" for none, whole minutes as minutes, anything else in seconds.
+pub(super) fn grace_label(secs: u32) -> String {
+    match secs {
+        0 => "Off".to_owned(),
+        secs if secs % 60 == 0 => format!("{} min", secs / 60),
+        secs => format!("{secs} s"),
+    }
+}
+
+/// The grace periods the segments offer for a form holding `current`: [`GRACE_CHOICES`], with `current` added in order
+/// when it is not one of them (a value saved through the helm's route by another client).
+fn grace_choices(current: u32) -> Vec<u32> {
+    let mut choices = GRACE_CHOICES.to_vec();
+    if !choices.contains(&current) {
+        choices.push(current);
+        choices.sort_unstable();
+    }
+    choices
+}
+
 /// Every priority, in the order the old segments showed them.
 pub(super) const PRIORITIES: [Priority; 5] = [
     Priority::Min,
@@ -111,6 +146,8 @@ struct Form {
     server_url: String,
     topic: String,
     priority: Priority,
+    /// How long the helm holds an alert back, in seconds ([`Settings::grace_period_secs`]).
+    grace_period_secs: u32,
     token: String,
     clear: bool,
 }
@@ -127,6 +164,7 @@ impl Form {
             server_url: stored.server_url.clone(),
             topic: stored.topic.clone(),
             priority: stored.priority,
+            grace_period_secs: stored.grace_period_secs,
             token: String::new(),
             clear: false,
         }
@@ -154,6 +192,7 @@ impl Form {
             // Always sent too, so the first save from this form turns an upgraded configuration's implied choice
             // into a stored one, and later changes to the ntfy switches no longer move it.
             ask_agents_when_blocked: Some(self.ask_agents),
+            grace_period_secs: Some(self.grace_period_secs),
         }
     }
 
@@ -851,6 +890,55 @@ impl NtfyAlerts {
         )
     }
 
+    /// The grace period row, under the event switches: its caption, the segments ([`grace_choices`]) and what the
+    /// period does ([`GRACE_NOTE`]). A press chooses into the form and saves nothing, as the priority segments do.
+    fn grace_row(&self, palette: &theme::Palette, cx: &Context<Self>) -> Div {
+        let form = self.form.value();
+        let edited = self
+            .stored
+            .as_ref()
+            .is_some_and(|stored| form.grace_period_secs != stored.grace_period_secs);
+        let choose = cx.weak_entity();
+        let group = grace_choices(form.grace_period_secs).into_iter().fold(
+            RadioGroup::new(
+                GRACE_ID,
+                GRACE_LABEL,
+                HoverHelp::tooltip(GRACE_HELP),
+                Role::Group,
+            )
+            // Sized from its words, not stretched across the card: six short choices in a full-width well read as
+            // scattered words.
+            .compact_segments(),
+            |group, secs| {
+                group.option(RadioOption::new(
+                    grace_label(secs),
+                    HoverHelp::tooltip(GRACE_HELP),
+                    secs,
+                ))
+            },
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(choices::LABEL_GAP))
+            .w_full()
+            .min_w_0()
+            .child(card::caption(GRACE_LABEL, edited, palette))
+            .child(
+                div().flex().min_w_0().child(
+                    group
+                        .chosen(Some(form.grace_period_secs))
+                        .disabled(self.locked())
+                        .on_change(move |&chosen, _, cx| {
+                            let _ = choose.update(cx, |alerts, cx| {
+                                let _ = alerts.edit(|form| form.grace_period_secs = chosen, cx);
+                            });
+                        }),
+                ),
+            )
+            .child(card::help("ntfy-grace-note", GRACE_NOTE, cx).min_w_0())
+    }
+
     /// A switch with its words, toggling through this form.
     fn switch(
         &self,
@@ -1167,6 +1255,7 @@ impl Render for NtfyAlerts {
                         |form, on| form.notify_blocked = on,
                         cx,
                     ),
+                    self.grace_row(palette, cx),
                     fields,
                     self.switch(
                         Switch::ClearToken,
@@ -1255,6 +1344,51 @@ mod tests {
         for absent in ["Cursor", "Grok", "Antigravity", "OpenCode", "Bash", "Zsh"] {
             assert!(!listed.contains(&absent), "{absent} in {words}");
         }
+    }
+
+    /// The segments must offer whatever the helm stores, or a value saved by another client would show nothing chosen
+    /// and the next Save would still send it unseen. Specified: the presets are Off, 5 s, 10 s, 30 s, 1 min and 2 min;
+    /// a stored value among them adds nothing, and one outside them (45, 600) is added in order and labelled in
+    /// seconds or whole minutes.
+    #[test]
+    fn the_grace_segments_offer_the_presets_and_any_stored_value() {
+        let labels: Vec<String> = GRACE_CHOICES.into_iter().map(grace_label).collect();
+        assert_eq!(labels, ["Off", "5 s", "10 s", "30 s", "1 min", "2 min"]);
+        assert_eq!(grace_choices(10), GRACE_CHOICES.to_vec());
+        assert_eq!(grace_choices(45), [0, 5, 10, 30, 45, 60, 120]);
+        assert_eq!(grace_choices(600), [0, 5, 10, 30, 60, 120, 600]);
+        assert_eq!(grace_label(45), "45 s");
+        assert_eq!(grace_label(600), "10 min");
+    }
+
+    /// The session pane throttles its interaction signal, which withdraws a held alert, so the throttle's gap must stay
+    /// well inside the shortest grace period offered here, or a withdrawal could wait past the alert's due time.
+    /// Specified: twice the gap is at most the shortest preset above Off.
+    #[test]
+    fn the_interaction_throttle_fits_inside_the_shortest_grace_period() {
+        let shortest = GRACE_CHOICES
+            .into_iter()
+            .filter(|secs| *secs > 0)
+            .min()
+            .expect("a grace period above Off is offered");
+        assert!(
+            crate::session_pane::INTERACTION_GAP * 2
+                <= std::time::Duration::from_secs(u64::from(shortest))
+        );
+    }
+
+    /// The grace period is saved with the rest of the form, or a Save would silently put an older client's default
+    /// back. Specified: the form over the stored settings sends their grace period, and an edited one sends the edit.
+    #[test]
+    fn the_grace_period_is_sent_with_the_form() {
+        let stored = Settings {
+            grace_period_secs: 30,
+            ..Settings::default()
+        };
+        let mut form = Form::over(&stored);
+        assert_eq!(form.save().grace_period_secs, Some(30));
+        form.grace_period_secs = 0;
+        assert_eq!(form.save().grace_period_secs, Some(0));
     }
 
     /// English lists read "A", "A and B", "A, B and C".

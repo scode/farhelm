@@ -1322,7 +1322,8 @@ fn notify_reason(reason: &str) -> Result<String, String> {
 /// say, so the session list shows it waiting on the user, then queue the ntfy alert, which the sender sends only while
 /// blocked alerts are on. The mark wakes clients only when the session was not blocked already; a repeated report
 /// changes nothing they show. The alert names the session by the helm's cached title; a session not cached yet (it
-/// has just started) is named by its id, so the alert still says which session it is.
+/// has just started) is named by its id, so the alert still says which session it is. The alert waits out the grace
+/// period like a waiting alert, and attending to the session or clearing its mark meanwhile withdraws it.
 ///
 /// The reason goes only into the alert. The session list shows the mark alone: the agent explains itself in its own
 /// terminal, which is where the user goes to answer it.
@@ -1333,12 +1334,15 @@ async fn notify_blocked(
     reason: String,
 ) -> anyhow::Result<AgentReply> {
     let key = crate::store::SessionKey::new(origin.host, session_id);
+    // The alert's start, read before the mark can reach any client: a switch to the session from then on is
+    // attention after the report, and must withdraw the alert.
+    let reported = tokio::time::Instant::now();
     let marked = state.store.mark_blocked(&key).await?;
     if marked.newly_blocked {
         state.manager.events().bump();
     }
     // The cap's evictions are removals like any other.
-    crate::attention::cleared_marks(state.manager.events(), &marked.evicted);
+    crate::attention::cleared_marks(state.manager.events(), &state.ntfy, &marked.evicted);
     let title = state
         .store
         .cached_session(origin.host, session_id)
@@ -1348,7 +1352,7 @@ async fn notify_blocked(
         .map(|info| info.title)
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| session_id.to_owned());
-    state.ntfy.enqueue_blocked(title, origin.host, reason);
+    state.ntfy.enqueue_blocked(key, title, reason, reported);
     Ok(AgentReply::Notified {})
 }
 
