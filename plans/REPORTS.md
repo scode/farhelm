@@ -11,3 +11,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`terminal-tab-shortcuts`](reports/terminal-tab-shortcuts.report.md) landed 2026-11-27 in #5164, #5166: Add Cmd+T/Cmd+W terminal-tab shortcuts and always confirm Delete when shell tabs are open
 - [`drift-conversation-rotation`](reports/drift-conversation-rotation.report.md) landed 2026-11-27 in #5170, #5171: Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
 - [`drift-persistent-hooks`](reports/drift-persistent-hooks.report.md) landed 2026-11-27 in #5173: Add persistent_hooks drift category verifying Grok and Antigravity hooks inside and outside Farhelm
+- [`terminal-tab-overflow-ux`](reports/terminal-tab-overflow-ux.report.md) landed 2026-11-28 in #5176, #5177: Pin the main Agent tab and add auto-scroll, edge fades, arrows, and an all-tabs menu for overflowing tabs

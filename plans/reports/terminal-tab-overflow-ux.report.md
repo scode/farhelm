@@ -130,3 +130,73 @@ Same-model sub-agents implemented the code and the fixes; I reviewed, committed 
   - three test gaps;
   - an overstated comment. Four of five nits were fixed; the list keeps borrowing the notifications bell's height cap,
     which other menus share.
+
+### Landing
+
+#### What landed with it
+
+Nothing reached main between the executor's last rebase of this plan and its landing, apart from the queue's own
+bookkeeping. It was the only plan in this round.
+
+An independent reviewer and I read the change against what was already on main, mainly the shell tab shortcuts that the
+terminal-tab-shortcuts plan added on 2026-11-27. The new-tab shortcut and the tab-switching shortcuts now bring the
+chosen tab into view the same way a click does. The close-tab shortcut (Cmd+W on a Mac) still scrolls the close button
+of the tab it is about to close into view before asking, counting tabs correctly now that the main tab sits outside the
+scrolling part. While the all-tabs list is open, those shortcuts do nothing, as for any open menu. Closing a tab from
+the list asks, or skips the question when "Skip session confirmations" is on, exactly as the tab's own close button
+does. The shared menu row's new option is off unless asked for, so every other menu is unchanged. The session header's
+width fitting is untouched, and the strip takes the same width with or without the overflow controls, so the 650 px
+layout beside a tunnel pill still fits. We found nothing that had to be fixed before landing.
+
+Worth knowing, from the review:
+
+- No `▾` in the narrowest strips, which the report already raises as a follow-up and SPEC.md now describes. The case
+  that matters most is a 650 px pane beside a tunnel pill: there the tabs are reachable only by scrolling and the
+  tab-switching shortcuts.
+- The edge fade also covers the chosen tab. A tab brought into view lands flush with the strip's edge, so when more tabs
+  lie beyond it, the 16 px fade washes that edge of it: at the left edge its mark and highlight but not its name, at the
+  right edge the last few pixels of its name too. Fades are left out only for the control keyboard focus is on. The
+  report mentions the right-edge case in one golden picture; it happens at the left edge too.
+- A close question asked from the list hangs under `▾`. If the tabs stop overflowing while it is open (another tab's
+  shell exits, say), `▾` goes and the question closes with it, and you have to ask again. Nothing is lost, but the tab's
+  own close button does not behave that way.
+- Apart from Escape closing it, the new tests drive the list by clicks only: choosing a row with Enter or Space, moving
+  through it with the arrow keys, and Tab staying inside it are not tested.
+- One sentence in SPEC_impl.md, on what the strip scrolls into view when keyboard focus reaches it, lists New terminal
+  alongside the tabs as if it could be out of view in the normal layout. It moves with the tabs, and so needs scrolling
+  to, only in the narrow layout. A one-line doc fix.
+
+Of these, I would take up the untested keys and the SPEC_impl.md sentence as small follow-ups, and leave the fade and
+the vanishing question unless they bother you in use.
+
+#### Fixes made while landing
+
+None.
+
+#### What the landing made untrue in the report
+
+Nothing.
+
+#### Checks
+
+Run once, on the plan's two PRs as they landed (main had gained only queue bookkeeping). The GUI crate's tests, the
+goldens and the other checks ran locally; the desktop app's end-to-end smoke ran on one boat:
+
+- `cargo clippy -p farhelm-gui --all-targets -- -D warnings`: clean. `cargo clippy -p farhelm-desktop --all-targets`
+  without `-D warnings`, because one warning already on main since #5120 (an unused method in the helm's ntfy settings
+  code, outside this plan) would fail that flag. That was the only warning.
+- The desktop GUI crate's tests (`cargo nextest run -p farhelm-gui`), recorded run 59ab28b8-43f6-46fd-8b5f-0b08430a521e:
+  3625 passed, none failed.
+- The screenshot goldens (`python3 scripts/check-gui-goldens.py`), recorded run 8b42d061-a52e-4f44-a913-8d9c28d6c8f3: no
+  differences from the published references, the plan's new and changed pictures included.
+- The desktop end-to-end smoke (`scripts/gui-e2e-smoke.py`, headless on Linux), recorded run
+  74cbb83a-886e-4387-af35-fb9cb72b7444: 49 ran and passed, 1 skipped (the paste test, which cannot own the clipboard in
+  a headless session).
+- The screenshot scene list's self-test (`python3 -B scripts/test-gui-screenshot-batch.py`, since the list gained the
+  plan's scenes): 47 passed.
+- `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`), `dprint check` on SPEC.md,
+  SPEC_impl.md, TODO.md, the changelog fragment and the scene list, and `python3 releasing/check-changelog.py format`:
+  passed.
+
+Reused: nothing. Skipped: the rest of the Rust workspace's tests, since nothing outside the desktop app changed; and any
+run on a Mac, since none was available to the landing, so how the fades and the list look on macOS is still unchecked.
