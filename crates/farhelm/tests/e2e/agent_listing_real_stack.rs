@@ -931,9 +931,9 @@ async fn allow_agents_without_asking(client: &reqwest::Client, base: &str) {
 /// Spec: an agent inside a real session, running the shipped `farhelm agent
 /// hosts` and `farhelm agent sessions`, is answered by the real helm — and
 /// exactly its own host and its own session carry the current-row marker.
-/// Its `farhelm agent notify` prints one confirmation line and leaves the
-/// helm's notices holding that session's blocked notice, titled and with the
-/// reason cleaned.
+/// Its `farhelm agent notify` prints one confirmation line and marks that
+/// session blocked in the helm's session list without writing a bell notice,
+/// and the desktop app's switch to the session clears the mark.
 ///
 /// The whole point is that nothing is injected. The handler reaches the
 /// connection through the helm's own startup, the origin is minted by the
@@ -1041,9 +1041,28 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
         .expect("the asking host is marked in JSON");
     assert_eq!(own_host["id"], reference.entry_uuid());
 
-    // `farhelm agent notify` through the same relay: the command confirms, and the
-    // helm's notices carry the asking session's blocked notice with its title and
-    // the reason cleaned (the line break folded into a space).
+    // `farhelm agent notify` through the same relay: the command confirms, the
+    // helm's session list marks the asking session blocked (and only it), and
+    // the notifications bell carries nothing for it.
+    let row_blocked = || async {
+        let list: serde_json::Value = client
+            .get(format!("{}/api/sessions", helm.base))
+            .send()
+            .await
+            .expect("session list read")
+            .json()
+            .await
+            .expect("session list JSON");
+        list["sessions"]
+            .as_array()
+            .expect("sessions array")
+            .iter()
+            .find(|row| row["id"] == session_id.as_str())
+            .unwrap_or_else(|| panic!("the asking session is listed: {list}"))["blocked"]
+            .as_bool()
+            .expect("the row carries the blocked mark")
+    };
+    assert!(!row_blocked().await, "the premise: nothing is blocked yet");
     let notified = agent_command_args(
         &["notify", "tests:\n need a decision"],
         &session_id,
@@ -1052,6 +1071,10 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     )
     .await;
     assert_eq!(notified.trim(), "Notified the user.", "{notified:?}");
+    assert!(
+        row_blocked().await,
+        "notify marks the asking session blocked"
+    );
     let notices: serde_json::Value = client
         .get(format!("{}/api/notices", helm.base))
         .send()
@@ -1060,16 +1083,23 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
         .json()
         .await
         .expect("notices JSON");
-    let blocked: Vec<&serde_json::Value> = notices["notices"]
-        .as_array()
-        .expect("notices array")
-        .iter()
-        .filter(|notice| notice["content"]["kind"] == "agent_blocked")
-        .collect();
-    assert_eq!(blocked.len(), 1, "{notices}");
-    assert_eq!(blocked[0]["content"]["session_id"], session_id);
-    assert_eq!(blocked[0]["content"]["session_title"], "the-asking-session");
-    assert_eq!(blocked[0]["content"]["reason"], "tests: need a decision");
+    assert_eq!(
+        notices["notices"].as_array().expect("notices array").len(),
+        0,
+        "notify writes no bell notice: {notices}"
+    );
+    // The desktop app's switch to the session is what clears the mark.
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/sessions/{session_id}/attention", helm.base),
+        serde_json::json!({"kind": "switch"}),
+    )
+    .await;
+    assert!(status.is_success(), "the switch is accepted: {body}");
+    assert!(
+        !row_blocked().await,
+        "switching to the session clears the mark"
+    );
 
     // The helm, supervisor and work directory are deliberately still alive here:
     // they hold the processes, the terminal hosts, and the directories both

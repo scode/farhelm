@@ -115,6 +115,12 @@ const NEW_ANNOUNCEMENT_SCHEMA: &str = "
 /// App-wide conditions have one identity per kind and key via the partial
 /// index, since SQLite treats NULLs as distinct in the table constraint.
 /// AUTOINCREMENT keeps a stale panel's IDs from naming later notices.
+///
+/// `agent_blocked` is a retired kind: schema 104 admitted it for `farhelm
+/// agent notify`, and schema 105 moved that report onto the session itself
+/// (`store::session_blocked`) and deleted its rows. The constraint still
+/// admits it because narrowing it means another [`rebuild_notices`], and
+/// nothing writes the kind any more; [`read_notices`] skips any row of it.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE notices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,7 +179,8 @@ pub(crate) fn upgrade_new_announcement_notice(
     rebuild_notices(tx, NEW_ANNOUNCEMENT_SCHEMA)
 }
 
-/// Add host-scoped notices for agents that say they are blocked, keeping existing notices and their IDs.
+/// Schema 104: admit host-scoped notices for agents that say they are blocked, keeping existing notices and their IDs.
+/// The kind is retired since schema 105 (see [`SCHEMA`]); the step stays so older databases reach the current shape.
 pub(crate) fn upgrade_agent_blocked_notice(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
     rebuild_notices(tx, SCHEMA)
 }
@@ -283,10 +290,15 @@ impl TrashRequests {
 
 /// Read under one SQLite snapshot; content decoding failures are ordinary store
 /// errors, never an empty panel that could acknowledge unseen conditions.
+///
+/// Rows of the retired `agent_blocked` kind are skipped, not decoded: no
+/// [`NoticeContent`] variant reads them any more, so a row the schema 105 step
+/// did not delete (a database whose version was rewound past it, say) would
+/// otherwise be a decoding error that empties every client's panel.
 fn read_notices(conn: &Connection, trash_host: Option<HostId>) -> anyhow::Result<Vec<Notice>> {
     let mut statement = conn.prepare(
         "SELECT id, host_id, raised_at, read, resolved, content FROM notices
-         WHERE ?1 IS NULL OR (host_id = ?1 AND kind = 'stuck_trash')
+         WHERE kind != 'agent_blocked' AND (?1 IS NULL OR (host_id = ?1 AND kind = 'stuck_trash'))
          ORDER BY raised_at DESC, id DESC",
     )?;
     let rows = statement.query_map([trash_host], |row| {
@@ -471,8 +483,7 @@ fn record_trash(
             | NoticeContent::FleetSessionLimit
             | NoticeContent::DesktopLoginPathUnavailable
             | NoticeContent::NewAnnouncement
-            | NoticeContent::LateDelete { .. }
-            | NoticeContent::AgentBlocked { .. } => None,
+            | NoticeContent::LateDelete { .. } => None,
         });
         let content = match &entry.stuck {
             Some(stuck) => NoticeContent::StuckTrash {
@@ -592,49 +603,6 @@ impl HelmStore {
             .await
     }
 
-    /// Record that the agent in `key`'s session said it is blocked (`farhelm agent notify`), replacing any earlier
-    /// notice of that session's under a new id, so the bell shows it unread again and an acknowledgement of the old
-    /// one cannot read the new one, while the table keeps at most one such notice per session. The session id comes
-    /// from the host's supervisor, which the helm does not trust (SPEC.md, "Local authority and trust between hosts"):
-    /// a host could report any number of made-up sessions, so a host keeps only its newest
-    /// [`LIST_SESSIONS_CAP`] blocked notices, as many as its listing can show sessions.
-    ///
-    /// `served_id` is the session's id as clients know it, for the notice's content; the notice is keyed by the
-    /// bare id in `key`.
-    pub(crate) async fn record_agent_blocked(
-        &self,
-        key: crate::store::SessionKey,
-        served_id: String,
-        session_title: String,
-        reason: String,
-        events: Arc<manager::FleetEvents>,
-    ) -> anyhow::Result<()> {
-        self.conn()
-            .call("agent blocked notice task panicked", move |conn| {
-                let content = serde_json::to_string(&NoticeContent::AgentBlocked {
-                    session_id: served_id,
-                    session_title,
-                    reason,
-                })?;
-                let tx = conn.transaction()?;
-                tx.execute(
-                    "INSERT OR REPLACE INTO notices (host_id, kind, condition_key, raised_at, read, resolved, content)
-                     VALUES (?1, 'agent_blocked', ?2, ?3, 0, 0, ?4)",
-                    rusqlite::params![key.host, key.session_id, raised_now(), content],
-                )?;
-                tx.execute(
-                    "DELETE FROM notices WHERE host_id = ?1 AND kind = 'agent_blocked' AND id NOT IN (
-                         SELECT id FROM notices WHERE host_id = ?1 AND kind = 'agent_blocked'
-                         ORDER BY id DESC LIMIT ?2)",
-                    rusqlite::params![key.host, LIST_SESSIONS_CAP as i64],
-                )?;
-                tx.commit()?;
-                events.bump();
-                Ok(())
-            })
-            .await
-    }
-
     /// Apply the desktop's lookup result before the first client reads its notices.
     /// One recurrence keeps its identity and any read state until explicitly cleared.
     pub(crate) async fn record_desktop_login_path(&self, available: bool) -> anyhow::Result<()> {
@@ -705,12 +673,11 @@ pub(crate) async fn marks(
             let tx = conn.transaction()?;
             let changed = {
                 let sql = match body.action {
-                    // A late Delete and an agent's blocked notice are events.
-                    // Once read, they have no active condition to resolve and
-                    // are available to Clear resolved.
+                    // A late Delete is an event. Once read, it has no active
+                    // condition to resolve and is available to Clear resolved.
                     MarkAction::Read => {
                         "UPDATE notices SET read = 1,
-                        resolved = CASE WHEN kind IN ('late_delete', 'agent_blocked') THEN 1 ELSE resolved END
+                        resolved = CASE WHEN kind = 'late_delete' THEN 1 ELSE resolved END
                         WHERE id = ?1 AND read = 0"
                     }
                     MarkAction::ClearResolved => {
@@ -1170,11 +1137,11 @@ pub(crate) mod tests {
         assert!(harness.store.notices().await.unwrap().notices.is_empty());
     }
 
-    /// Helm schema 104 rebuilds the notices table to admit blocked-agent notices. Users' notices and read marks must
+    /// Helm schema 104 rebuilt the notices table to admit blocked-agent notices. Users' notices and read marks must
     /// survive it, and the id high-water mark too, or an acknowledgement a panel still holds could name a later notice.
     /// Specified: a database at 103 whose table cannot hold a blocked notice, holding one read and resolved notice with
-    /// the id sequence at 100, keeps that notice unchanged across the upgrade, and a blocked notice recorded after it
-    /// gets an id above 100.
+    /// the id sequence at 100, keeps that notice unchanged across the upgrade, and a notice recorded after it gets an id
+    /// above 100.
     #[farhelm_testtrace::test]
     async fn agent_blocked_migration_keeps_the_previous_table_history() {
         let dir = tempfile::tempdir().unwrap();
@@ -1186,6 +1153,7 @@ pub(crate) mod tests {
             let mut conn = db.lock();
             conn.execute_batch(&format!(
                 "DROP TABLE notices; {NEW_ANNOUNCEMENT_SCHEMA}
+                 DROP TABLE session_blocked;
                  PRAGMA user_version = 103;"
             ))
             .unwrap();
@@ -1216,95 +1184,58 @@ pub(crate) mod tests {
         let migrated = HelmStore::open(&path).await.unwrap();
         assert_eq!(migrated.notices().await.unwrap().notices, old);
         migrated
-            .record_agent_blocked(
+            .record_late_delete(
                 crate::store::SessionKey::new(host, "s"),
-                "s".into(),
-                "Build console".into(),
-                "deploy: no credentials".into(),
+                "Checkout left at /work/left".into(),
                 Arc::new(manager::FleetEvents::default()),
             )
             .await
             .unwrap();
         let notices = migrated.notices().await.unwrap().notices;
         assert!(notices.contains(&old[0]));
-        let blocked = notices
+        let late = notices
             .iter()
-            .find(|notice| matches!(notice.content, NoticeContent::AgentBlocked { .. }))
-            .expect("the blocked notice");
-        assert!(blocked.id > 100, "{blocked:?}");
+            .find(|notice| matches!(notice.content, NoticeContent::LateDelete { .. }))
+            .expect("the late Delete notice");
+        assert!(late.id > 100, "{late:?}");
     }
 
-    /// A host's supervisor names the session a blocked notice is for, and the helm does not trust it, so the notices
-    /// it can leave are bounded by what its listing could ever show. Specified: after `LIST_SESSIONS_CAP` + 1 reports
-    /// from as many sessions of one host, that host has exactly `LIST_SESSIONS_CAP` blocked notices, the oldest gone.
+    /// No notice kind reads an `agent_blocked` row any more, and a single undecodable row would fail the whole read
+    /// and leave every client's panel unavailable. The schema 105 step deletes such rows, but a database that kept one
+    /// (its version rewound past that step, say) must still read. Specified: with one legacy `agent_blocked` row and
+    /// one late Delete notice stored, the notice read succeeds and returns only the late Delete notice.
     #[farhelm_testtrace::test]
-    async fn a_host_keeps_at_most_a_listing_of_blocked_notices() {
-        let harness = FleetBuilder::new().await.start().await;
-        let host = rest_harness::local_id(&harness.store).await;
-        for n in 0..=LIST_SESSIONS_CAP {
-            let session = format!("s{n}");
-            harness
-                .store
-                .record_agent_blocked(
-                    crate::store::SessionKey::new(host, &session),
-                    session.clone(),
-                    "Build console".into(),
-                    "blocked".into(),
-                    Arc::clone(harness.manager.events()),
-                )
-                .await
-                .unwrap();
-        }
-        let notices = harness.store.notices().await.unwrap().notices;
-        assert_eq!(notices.len(), LIST_SESSIONS_CAP);
-        assert!(!notices.iter().any(|notice| matches!(
-            &notice.content,
-            NoticeContent::AgentBlocked { session_id, .. } if session_id == "s0"
-        )));
-    }
-
-    /// An agent may report it is blocked again and again; the bell must show the latest report unread without the table
-    /// growing, and the read state of an older report must not carry over to the new one. Specified: two reports from
-    /// one session leave one notice holding the second reason, unread, under a larger id; a report from another session
-    /// adds a second notice; marking the first read resolves it, so Clear resolved removes it.
-    #[farhelm_testtrace::test]
-    async fn an_agent_blocked_notice_is_one_per_session_and_reading_resolves_it() {
-        let harness = FleetBuilder::new().await.start().await;
-        let host = rest_harness::local_id(&harness.store).await;
-        let record = |session: &'static str, reason: &'static str| {
-            harness.store.record_agent_blocked(
-                crate::store::SessionKey::new(host, session),
-                session.into(),
-                "Build console".into(),
-                reason.into(),
-                Arc::clone(harness.manager.events()),
+    async fn a_leftover_blocked_agent_notice_is_skipped_by_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        let host = rest_harness::local_id(&store).await;
+        store
+            .record_late_delete(
+                crate::store::SessionKey::new(host, "former"),
+                "Checkout left at /work/left".into(),
+                Arc::new(manager::FleetEvents::default()),
             )
-        };
-        record("one", "deploy: no credentials").await.unwrap();
-        let first = harness.store.notices().await.unwrap().notices.remove(0);
-        record("one", "deploy: still no credentials").await.unwrap();
-        let notices = harness.store.notices().await.unwrap().notices;
-        assert_eq!(notices.len(), 1, "one notice per session: {notices:?}");
-        let second = &notices[0];
-        assert!(second.id > first.id && !second.read && !second.resolved);
-        assert_eq!(
-            second.content,
-            NoticeContent::AgentBlocked {
-                session_id: "one".into(),
-                session_title: "Build console".into(),
-                reason: "deploy: still no credentials".into(),
-            }
-        );
-        record("two", "tests: need a decision").await.unwrap();
-        assert_eq!(harness.store.notices().await.unwrap().notices.len(), 2);
-        let ids = [second.id];
-        mark(&harness, "read", &ids).await;
-        mark(&harness, "clear_resolved", &ids).await;
-        let left = harness.store.notices().await.unwrap().notices;
-        assert_eq!(left.len(), 1);
+            .await
+            .unwrap();
+        store
+            .connection_for_test()
+            .lock()
+            .execute(
+                "INSERT INTO notices (host_id, kind, condition_key, raised_at, read, resolved, content)
+                 VALUES (?1, 'agent_blocked', 's', 0, 0, 0,
+                     '{\"kind\":\"agent_blocked\",\"session_id\":\"s\",\"session_title\":\"t\",\"reason\":\"r\"}')",
+                [host],
+            )
+            .expect("the premise: the current table still admits the retired kind");
+        let notices = store
+            .notices()
+            .await
+            .expect("the read tolerates the row")
+            .notices;
+        assert_eq!(notices.len(), 1, "{notices:?}");
         assert!(matches!(
-            &left[0].content,
-            NoticeContent::AgentBlocked { session_id, .. } if session_id == "two"
+            notices[0].content,
+            NoticeContent::LateDelete { .. }
         ));
     }
 

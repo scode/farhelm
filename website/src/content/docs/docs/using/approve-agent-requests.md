@@ -15,8 +15,9 @@ your browser ([Open links from a remote session](#open-links-from-a-remote-sessi
 those changes happens by default, whoever typed the command; a command you type yourself in a session's terminal is
 asked about the same way. You can [stop asking for a host](/docs/using/approve-agent-requests/#stop-asking-for-a-host).
 Looking never asks, and neither does `farhelm agent notify "<what is blocked: why>"`, which an agent runs to tell you it
-is stuck: the report shows in the Notifications bell on the navigation rail, the column of icons down the left edge of
-the sidebar, and can reach your phone ([Ntfy alerts](/docs/using/session-list/#ntfy-alerts)). An agent in a
+is stuck: its session then counts as waiting in your session list until you switch to it
+([What the statuses mean](/docs/using/session-list/#what-the-statuses-mean)), and the report can reach your phone
+([Ntfy alerts](/docs/using/session-list/#ntfy-alerts)). An agent in a
 [container session](/docs/agents/containerized-sessions/) or a
 [sandbox session](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can act only within its own
 container or sandbox ([Agents in sandboxes and containers](#agents-in-sandboxes-and-containers)). Agents on other hosts

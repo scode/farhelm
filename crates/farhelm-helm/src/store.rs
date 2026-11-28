@@ -371,7 +371,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 104;
+pub(crate) const SCHEMA_VERSION: i64 = 105;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -644,8 +644,10 @@ const SESSION_PINS_ORDERED_SCHEMA: &str = "CREATE TABLE session_pins (
              ) STRICT;";
 
 mod manual_order;
+mod session_blocked;
 pub(crate) mod session_groups;
 mod session_mutes;
+use session_blocked::SESSION_BLOCKED_SCHEMA;
 use session_groups::SESSION_GROUPS_SCHEMA;
 use session_mutes::SESSION_MUTES_SCHEMA;
 pub(crate) use session_mutes::{MuteEntry, MuteObservation};
@@ -2001,7 +2003,14 @@ impl SessionFilter {
     /// an unmatched dimension is simply false — because a filter is a
     /// question about a row, and there is no row this can fail to answer
     /// for.
-    pub fn matches(&self, host: HostId, info: &SessionInfo) -> bool {
+    ///
+    /// `blocked` is the helm's blocked mark for the session
+    /// (`SessionRow::blocked`). The status dimension compares the EFFECTIVE
+    /// status: a session that reads as waiting with the mark counted
+    /// (`SessionStatus::effectively_waiting`) matches `waiting` and never its
+    /// raw `running`, `idle` or `unknown`, so the Running, Waiting and Idle
+    /// filters stay disjoint.
+    pub fn matches(&self, host: HostId, info: &SessionInfo, blocked: bool) -> bool {
         if let Some(key) = &self.session
             && (key.host != host || info.id != key.session_id)
         {
@@ -2012,10 +2021,15 @@ impl SessionFilter {
         {
             return false;
         }
-        if let Some(status) = self.status
-            && status != status_key(&info.status)
-        {
-            return false;
+        if let Some(status) = self.status {
+            let effective = if info.status.effectively_waiting(blocked) {
+                "waiting"
+            } else {
+                status_key(&info.status)
+            };
+            if status != effective {
+                return false;
+            }
         }
         if let Some(parent) = &self.parent
             && (parent.host != host || info.parent.as_deref() != Some(parent.session_id.as_str()))
@@ -2647,6 +2661,11 @@ pub struct HelmStore {
     /// save's database call (`save_ntfy_config`). It exists so a host's refresh can ask without awaiting the
     /// database: `SPEC_impl.md`, "Ntfy waiting alerts", keeps database and network waits off that path.
     ntfy_waiting: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The sessions `session_blocked` may hold a mark for, seeded when the store opens and changed only inside
+    /// connection calls. It lets terminal input and host refreshes ask whether a session is blocked without a database
+    /// call; see `session_blocked`'s module docs for why it may hold extra keys but never miss one, and what an
+    /// incomplete gate (a failed read at open) does instead.
+    blocked: session_blocked::SharedGate,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -2921,6 +2940,8 @@ pub struct HelmStore {
 /// - 93: the Antigravity workspace trust setting and hint dismissal.
 /// - 94: upgrade highlights follow one shared choice and release record. Upgraded databases start unset.
 /// - 102: bounded repository history shared by all hosts, seeded from retained launch intent.
+/// - 105: `session_blocked`, the mark `farhelm agent notify` leaves on its session, replacing the `agent_blocked`
+///   notices schema 104 admitted, which the step deletes.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -3257,6 +3278,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {SESSION_SEEN_PAIRED_SCHEMA}
               {SESSION_PINS_ORDERED_SCHEMA}
               {SESSION_MUTES_SCHEMA}
+              {SESSION_BLOCKED_SCHEMA}
               {SESSION_GROUPS_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
@@ -3273,7 +3295,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 104;",
+              PRAGMA user_version = 105;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
             custom_agents_schema = crate::custom_agents::SCHEMA,
@@ -5339,6 +5361,12 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 104")?;
         version = 104;
     }
+    if version == 104 {
+        session_blocked::migrate(&tx).context("adding blocked session marks")?;
+        tx.execute_batch("PRAGMA user_version = 105;")
+            .context("migrating helm.db to schema version 105")?;
+        version = 105;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5853,8 +5881,9 @@ impl HelmStore {
 
     async fn open_existing_inner(path: &Path, read_only: bool) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
-        let (conn, schema_version, waiting) =
-            tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64, bool)> {
+        type Opened = (Connection, i64, bool, session_blocked::SharedGate);
+        let (conn, schema_version, waiting, blocked) =
+            tokio::task::spawn_blocking(move || -> anyhow::Result<Opened> {
                 // The precheck only sharpens the diagnostic for the common
                 // mistyped-path case; the missing CREATE flag below is what
                 // actually guarantees nothing is ever created.
@@ -5889,7 +5918,8 @@ impl HelmStore {
                     );
                 }
                 let waiting = crate::ntfy::seed_waiting_alerts(&conn);
-                Ok((conn, version, waiting))
+                let blocked = session_blocked::seed(&conn);
+                Ok((conn, version, waiting, blocked))
             })
             .await
             .context("helm store open task panicked")??;
@@ -5897,6 +5927,7 @@ impl HelmStore {
             conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
             ntfy_waiting: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(waiting)),
+            blocked,
         })
     }
 
@@ -5906,7 +5937,8 @@ impl HelmStore {
         creation_build: Option<&'static str>,
     ) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
-        let (conn, schema_version, waiting) = tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64, bool)> {
+        type Opened = (Connection, i64, bool, session_blocked::SharedGate);
+        let (conn, schema_version, waiting, blocked) = tokio::task::spawn_blocking(move || -> anyhow::Result<Opened> {
             // Explicit flags rather than `Connection::open`'s defaults —
             // see the supervisor store's identical `open` for why
             // `SQLITE_OPEN_URI` is deliberately left out (a state-dir path
@@ -5942,7 +5974,8 @@ impl HelmStore {
                 version
             };
             let waiting = crate::ntfy::seed_waiting_alerts(&conn);
-            Ok((conn, schema_version, waiting))
+            let blocked = session_blocked::seed(&conn);
+            Ok((conn, schema_version, waiting, blocked))
         })
         .await
         .context("helm store open task panicked")??;
@@ -5950,6 +5983,7 @@ impl HelmStore {
             conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
             ntfy_waiting: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(waiting)),
+            blocked,
         })
     }
 
@@ -24446,57 +24480,69 @@ mod tests {
         assert!(
             SessionFilter::default()
                 .directory("src/farhelm")
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
-        assert!(SessionFilter::default().title("DRAIN").matches(1, &info));
+        assert!(
+            SessionFilter::default()
+                .title("DRAIN")
+                .matches(1, &info, false)
+        );
         assert!(
             !SessionFilter::default()
                 .title("drainpipe")
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
 
         // Enumerable: exact.
-        assert!(SessionFilter::default().status("waiting").matches(1, &info));
-        assert!(!SessionFilter::default().status("running").matches(1, &info));
-        assert!(SessionFilter::default().host(1).matches(1, &info));
-        assert!(!SessionFilter::default().host(2).matches(1, &info));
+        assert!(
+            SessionFilter::default()
+                .status("waiting")
+                .matches(1, &info, false)
+        );
+        assert!(
+            !SessionFilter::default()
+                .status("running")
+                .matches(1, &info, false)
+        );
+        assert!(SessionFilter::default().host(1).matches(1, &info, false));
+        assert!(!SessionFilter::default().host(2).matches(1, &info, false));
         assert!(
             SessionFilter::default()
                 .parent(&SessionKey::new(1, "parent-7"))
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
         assert!(
             !SessionFilter::default()
                 .parent(&SessionKey::new(1, "parent"))
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
         assert!(
             !SessionFilter::default()
                 .parent(&SessionKey::new(2, "parent-7"))
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
         assert!(
             !SessionFilter::default()
                 .host(2)
                 .parent(&SessionKey::new(1, "parent-7"))
-                .matches(2, &info)
+                .matches(2, &info, false)
         );
         // One session, on its own entry only: an equal bare ID on another
         // host entry is a different session.
         assert!(
             SessionFilter::default()
                 .session(&SessionKey::new(1, "s-1"))
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
         assert!(
             !SessionFilter::default()
                 .session(&SessionKey::new(1, "s-1"))
-                .matches(2, &info)
+                .matches(2, &info, false)
         );
         assert!(
             !SessionFilter::default()
                 .session(&SessionKey::new(1, "s-2"))
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
 
         // Dimensions AND: adding one can only ever narrow.
@@ -24504,7 +24550,7 @@ mod tests {
             !SessionFilter::default()
                 .title("drain")
                 .status("running")
-                .matches(1, &info)
+                .matches(1, &info, false)
         );
         assert!(SessionFilter::default().is_empty());
         assert!(!SessionFilter::default().title("x").is_empty());
@@ -24512,6 +24558,46 @@ mod tests {
             !SessionFilter::default()
                 .parent(&SessionKey::new(1, "parent-7"))
                 .is_empty()
+        );
+    }
+
+    /// A session whose agent said it is blocked reads as waiting, so the Waiting filter must find it and the Running
+    /// and Idle filters must not: the segmented status choice promises those three are disjoint. Specified: a blocked
+    /// Running, Idle or unclassified session matches `waiting` and not its own raw word, an unblocked one matches only
+    /// its raw word, and a blocked session that has ended matches only its ended word.
+    #[farhelm_testtrace::test]
+    fn a_blocked_session_filters_as_waiting_and_never_as_running_or_idle() {
+        use farhelm_proto::SessionStatus;
+
+        for status in [
+            SessionStatus::Running,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+        ] {
+            let raw = status_key(&status);
+            let info = SessionInfo {
+                status,
+                ..session("s-1", 100)
+            };
+            let filter = |word| SessionFilter::default().status(word);
+            assert!(filter("waiting").matches(1, &info, true), "{raw}");
+            assert!(!filter(raw).matches(1, &info, true), "{raw}");
+            assert!(!filter("waiting").matches(1, &info, false), "{raw}");
+            assert!(filter(raw).matches(1, &info, false), "{raw}");
+        }
+        let ended = SessionInfo {
+            status: SessionStatus::Exited { exit_code: Some(0) },
+            ..session("s-1", 100)
+        };
+        assert!(
+            SessionFilter::default()
+                .status("exited")
+                .matches(1, &ended, true)
+        );
+        assert!(
+            !SessionFilter::default()
+                .status("waiting")
+                .matches(1, &ended, true)
         );
     }
 

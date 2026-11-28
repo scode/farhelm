@@ -6274,6 +6274,39 @@ installation it is on, so it follows an open session the sidebar's filter hides
   transaction before deleting the original. Confirmed Delete clears the mute and any held key before clearing the seen
   stamp.
 
+- Blocked marks (SPEC.md, Status) live in `session_blocked` (helm schema 105), keyed by the same entry and session pair,
+  with the helm's Unix-millisecond time of the latest report. It is a table of its own rather than a `session_seen`
+  column, because a seen stamp is required and Mark unread deletes its row, and rather than a cache column, because the
+  cache is replaced by every refresh. `farhelm agent notify` upserts the row; a host keeps its `LIST_SESSIONS_CAP`
+  newest, since the session id comes from an untrusted supervisor. Listing and detail rows carry `blocked: bool`, read
+  from the table in the same batches as the other viewer state, and never change `status`. The helm's Activity grouping
+  and work-start key, and its `?status=` filter, read the two through `SessionStatus::effectively_waiting`: waiting, or
+  blocked and not ended.
+
+  The store keeps an in-memory set of marked keys, seeded at open and changed only inside the connection calls that
+  write the table, kept a superset of it (a key enters before its row and leaves after it), so the clearing paths that
+  run constantly answer "not blocked" without SQLite. A failed read at open does not refuse the open: the set is then
+  incomplete and answers "may be blocked" for every session, so clears go to the database until a later connection call
+  reads the table and completes it. The clearing paths are: each input frame the terminal WebSocket forwards that the
+  user's hand produced (a key, text, a paste part, or a mouse press, release or drag; focus reports, motion with no
+  button held, wheel reports and undecodable frames do not count, since the app sends the first by itself and the others
+  can reach a window that is not active), a successful Stop or Restart, confirmed Delete and Replace's removal of its
+  source, and each accepted listing on the current connection, which clears a session reported ended or, when the
+  listing is not truncated, one it no longer contains. The terminal path reads only a frame's tag and mouse fields, and
+  hands the clear to a task of its own, one at a time per session and at most every five seconds after a failure, so
+  typing never waits on the database. Every removal, including the cap's evictions, ends in `attention::cleared_marks`,
+  which bumps the fleet-events revision and is the one place for anything else that must follow it, except a host
+  entry's removal, whose rows cascade away without passing through it; per-session state hung on `cleared_marks` must
+  also be dropped when its host goes.
+
+  `POST /api/sessions/{id}/attention` takes `{"kind": "switch" | "interaction"}`; like the seen route it resolves
+  ownership without contacting the host, and a switch clears the mark while an interaction does not. Unlike the seen
+  route it accepts a retired containerized session (SPEC.md, "Retired containerized sessions"): such a session's
+  terminal cannot be opened and Stop is refused, so a switch is the only way to clear its mark short of Delete. Both
+  kinds, and each counted terminal input frame, go to the ntfy sender's awareness hook (`Alerts::note_attention`), which
+  records nothing yet. The 104→105 step creates the table and deletes the `agent_blocked` notices that the mark
+  replaced, without rebuilding `notices`, whose constraint still admits the retired kind; notice reads skip it.
+
 - Shared pins live in `session_pins`, keyed by `(host_id, session_id)` since helm schema 63, with a NOT NULL signed
   `position` since schema 74. The 73→74 step rebuilds the presence-only table using the same DDL as fresh creation,
   seeding positions from oldest positive creation time recorded in the cache, then unknown times, with
@@ -6393,12 +6426,12 @@ Test-built helms default offline and inject a loopback client only for alert tes
 Blocked alerts share that queue, sender and rate window as a second alert kind. `farhelm agent notify` relays
 `AgentVerb::Notify` (protocol 93) over the authenticated agent relay. It is not a mutating verb, so it takes no session
 change fence: an agent blocked on its own change still waiting for an approval card can report it, and a retry after a
-lost answer only replaces the same notice. The supervisor only bounds the reason's bytes; the helm cleans it (refusing
-an empty or over-long one), then, for the asking session alone and without an approval, writes a host-scoped
-`agent_blocked` notice keyed by the session id with `INSERT OR REPLACE` (a fresh id per report, at most one row per
-session, and at most `LIST_SESSIONS_CAP` per host, since the session id comes from an untrusted supervisor; reading it
-resolves it, as for a late Delete; helm schema 104 widened the notices kinds) and try-sends a blocked alert, which the
-sender drops unless the master switch, the blocked switch and a topic are all set.
+lost answer only refreshes the same mark. The supervisor only bounds the reason's bytes; the helm cleans it (refusing an
+empty or over-long one), then, for the asking session alone and without an approval, marks the session blocked
+(`session_blocked`, see "Helm internals"), bumping the fleet-events revision only when it was not blocked already, and
+try-sends a blocked alert, which the sender drops unless the master switch, the blocked switch and a topic are all set.
+The reason goes only into the alert. Until helm schema 105 the report was an `agent_blocked` notice in the rail's bell
+instead (schema 104 widened the notices kinds for it).
 
 Protected GET/PUT `/api/ntfy-alerts` read/save an independent schema-47 singleton, not the queued shared preferences.
 The JSON stored in helm.db includes the token; the response contains only `token_set`. Saves atomically preserve an

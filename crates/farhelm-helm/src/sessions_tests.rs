@@ -2092,6 +2092,8 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
 /// still returns an empty object when there is no cleanup notice.
 /// A Stop carrying an approval for a different connection refuses before
 /// sending any request through the same live route.
+/// A stopped agent is blocked on nothing (SPEC.md, Status), so a completed
+/// Stop clears the session's blocked mark, while the refused one leaves it.
 #[farhelm_testtrace::test]
 async fn stop_session_happy_path_returns_200_with_empty_object_body() {
     use farhelm_proto::ControlMsg;
@@ -2143,6 +2145,14 @@ async fn stop_session_happy_path_returns_200_with_empty_object_body() {
         let (_, client) = super::route_active_session(&harness.state, &key)
             .await
             .expect("the test session has a live Stop route");
+        assert!(
+            harness
+                .store
+                .mark_blocked(&key)
+                .await
+                .unwrap()
+                .newly_blocked
+        );
         let other_connection = client.connection_id().wrapping_add(1);
         let refusal =
             super::do_stop_session(&harness.state, &key, true, false, Some(other_connection))
@@ -2153,6 +2163,15 @@ async fn stop_session_happy_path_returns_200_with_empty_object_body() {
             farhelm_proto::ErrorKind::Conflict
         );
         assert!(refusal.to_string().contains("Nothing was stopped"));
+        assert!(
+            harness
+                .store
+                .blocked_sessions(std::slice::from_ref(&key))
+                .await
+                .unwrap()
+                .contains(&key),
+            "a refused Stop leaves the blocked mark"
+        );
 
         let app = harness.router();
         let request = axum::http::Request::builder()
@@ -2170,6 +2189,15 @@ async fn stop_session_happy_path_returns_200_with_empty_object_body() {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value, serde_json::json!({}));
+        assert!(
+            harness
+                .store
+                .blocked_sessions(std::slice::from_ref(&key))
+                .await
+                .unwrap()
+                .is_empty(),
+            "a completed Stop clears the blocked mark"
+        );
 
         peer.await.unwrap();
     }
@@ -2699,6 +2727,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
 /// before the delete and checking the store directly afterward, since the
 /// REST reply carries no evidence either way (SPEC.md's "delete" leaves
 /// nothing behind to inspect through the API once the session is gone).
+/// The blocked mark goes the same way.
 #[farhelm_testtrace::test]
 async fn delete_session_drops_viewer_state() {
     use farhelm_proto::ControlMsg;
@@ -2788,6 +2817,15 @@ async fn delete_session_drops_viewer_state() {
             .contains(&store::SessionKey::new(viewer_host, "sess-1")),
         "fixture premise: source pin exists"
     );
+    assert!(
+        harness
+            .store
+            .mark_blocked(&key)
+            .await
+            .unwrap()
+            .newly_blocked,
+        "fixture premise: the session is blocked"
+    );
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("DELETE")
@@ -2798,6 +2836,15 @@ async fn delete_session_drops_viewer_state() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
 
+    assert!(
+        harness
+            .store
+            .blocked_sessions(std::slice::from_ref(&key))
+            .await
+            .unwrap()
+            .is_empty(),
+        "the blocked mark must not survive the session it names"
+    );
     assert!(
         harness
             .store
@@ -4497,6 +4544,8 @@ async fn a_replace_forwards_its_source_delete_precondition() {
 /// `session_seen` paragraph): replace used to leave it behind.
 /// A move from another client must be refused once Replace has copied the
 /// original's group. Otherwise a successful move could vanish at cleanup.
+/// The source's blocked mark is cleared and not inherited: the replacement
+/// is a fresh agent that has asked nothing (SPEC.md, Status).
 #[farhelm_testtrace::test]
 async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -4667,6 +4716,15 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     );
     let source = store::SessionKey::new(viewer_host, "sess-1");
     let replacement = store::SessionKey::new(viewer_host, "sess-2");
+    assert!(
+        harness
+            .store
+            .mark_blocked(&source)
+            .await
+            .unwrap()
+            .newly_blocked,
+        "fixture premise: the source is blocked"
+    );
     let group = harness
         .store
         .create_session_group("Work".into(), vec![source.clone()])
@@ -4708,6 +4766,15 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         }
     );
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert!(
+        harness
+            .store
+            .blocked_sessions(&[source.clone(), replacement.clone()])
+            .await
+            .unwrap()
+            .is_empty(),
+        "Replace clears the source's blocked mark and the replacement inherits none"
+    );
     let view = harness
         .store
         .session_group_projection(&[source.clone(), replacement.clone()])
@@ -6925,6 +6992,9 @@ async fn create_session_error_reply_maps_to_bad_request_status() {
 /// handler: it is the user's permission to kill a running agent, so a
 /// route that dropped or defaulted it would be a silent safety regression
 /// rather than a visible failure.
+///
+/// A restarted agent starts over, so the restart also clears a blocked mark
+/// the previous run left (SPEC.md, Status).
 #[farhelm_testtrace::test]
 async fn restart_session_passes_consent_through_and_returns_the_session() {
     use farhelm_proto::ControlMsg;
@@ -6990,6 +7060,15 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
     });
 
     let harness = rest_harness::spliced_helm(client_side).await;
+    let key = store::SessionKey::new(rest_harness::local_id(&harness.store).await, "sess-1");
+    assert!(
+        harness
+            .store
+            .mark_blocked(&key)
+            .await
+            .unwrap()
+            .newly_blocked
+    );
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("POST")
@@ -7011,6 +7090,15 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
     assert_eq!(
         value["restart_offer"], "resume",
         "the reply carries the offer the session has NOW, which is what a client re-renders"
+    );
+    assert!(
+        harness
+            .store
+            .blocked_sessions(std::slice::from_ref(&key))
+            .await
+            .unwrap()
+            .is_empty(),
+        "the restart clears the blocked mark"
     );
 
     peer.await.unwrap();
@@ -13601,6 +13689,50 @@ async fn retired_container_plain_and_custom_replace_dispatch_no_create_or_delete
             .expect("observe no dispatched work after refusal");
         responder.await.unwrap();
     }
+}
+
+/// A retired row refuses every viewer write, but not a switch to it: its
+/// terminal cannot be opened and it cannot be stopped, so switching is the one
+/// way left to clear a blocked mark its agent left, short of deleting it.
+/// Pinned so a later "retired rows refuse everything" sweep does not take that
+/// away. Specified: on a blocked retired row, a `switch` answers 200, clears the
+/// mark, and dispatches nothing to the connected (silent) supervisor.
+#[farhelm_testtrace::test]
+async fn a_switch_clears_a_retired_rows_blocked_mark() {
+    let (client, peer) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(client, vec![retired_container_source()]).await;
+    let (observe, responder) = silent_supervisor(peer);
+    harness.await_refreshed(local).await;
+    let key = store::SessionKey::new(local, "sess-1");
+    assert!(
+        harness
+            .store
+            .mark_blocked(&key)
+            .await
+            .unwrap()
+            .newly_blocked,
+        "fixture premise: the retired row is blocked"
+    );
+    let (status, body) = post_text(
+        &harness,
+        &harness.local_session_uri("/api/sessions/sess-1/attention"),
+        serde_json::json!({"kind": "switch"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert!(
+        harness
+            .store
+            .blocked_sessions(std::slice::from_ref(&key))
+            .await
+            .unwrap()
+            .is_empty(),
+        "the switch clears the retired row's mark"
+    );
+    observe
+        .send(())
+        .expect("peer remains alive through the switch");
+    responder.await.unwrap();
 }
 
 /// A known retired row keeps no mutation or terminal convenience through raw

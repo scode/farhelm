@@ -550,7 +550,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 crate::browser::open_url(&state, origin, session_id, url).await
             }
             ParsedAgentVerb::Notify { reason } => {
-                notify_blocked(&state, origin, session_id, &caller_entry_uuid, reason).await
+                notify_blocked(&state, origin, session_id, reason).await
             }
             ParsedAgentVerb::Rename {
                 session_id: target,
@@ -1291,7 +1291,7 @@ enum ParsedAgentVerb {
     },
 }
 
-/// An agent's `farhelm agent notify` reason as the bell and the ntfy alert show it: every run of whitespace (line breaks
+/// An agent's `farhelm agent notify` reason as the ntfy alert shows it: every run of whitespace (line breaks
 /// included) one space, characters that must not be shown as themselves removed (the shared presentation list, as for
 /// alert titles), trimmed. Refused when nothing is left, or when it is longer than
 /// [`farhelm_proto::AGENT_NOTIFY_REASON_CAP`] characters: the agent is asked for one short sentence, and a refusal
@@ -1318,22 +1318,27 @@ fn notify_reason(reason: &str) -> Result<String, String> {
     Ok(cleaned)
 }
 
-/// Answer an agent's `farhelm agent notify` for its own session: record the bell's notice whatever the ntfy settings
-/// say, then queue the ntfy alert, which the sender sends only while blocked alerts are on. The session's title is the
-/// helm's cached one; a session not cached yet (it has just started) is named by its id, so the notice still says
-/// which session it is. The notice names the session by the id clients know it by, with its host's entry
-/// (`entry_uuid`), so the desktop can tell it from a session of the same bare id on another host.
+/// Answer an agent's `farhelm agent notify` for its own session: mark the session blocked whatever the ntfy settings
+/// say, so the session list shows it waiting on the user, then queue the ntfy alert, which the sender sends only while
+/// blocked alerts are on. The mark wakes clients only when the session was not blocked already; a repeated report
+/// changes nothing they show. The alert names the session by the helm's cached title; a session not cached yet (it
+/// has just started) is named by its id, so the alert still says which session it is.
+///
+/// The reason goes only into the alert. The session list shows the mark alone: the agent explains itself in its own
+/// terminal, which is where the user goes to answer it.
 async fn notify_blocked(
     state: &Arc<AppState>,
     origin: AgentOrigin,
     session_id: &str,
-    entry_uuid: &str,
     reason: String,
 ) -> anyhow::Result<AgentReply> {
     let key = crate::store::SessionKey::new(origin.host, session_id);
-    let served_id = farhelm_proto::SessionRef::new(entry_uuid, session_id)
-        .map(|reference| reference.to_string())
-        .unwrap_or_else(|_| session_id.to_owned());
+    let marked = state.store.mark_blocked(&key).await?;
+    if marked.newly_blocked {
+        state.manager.events().bump();
+    }
+    // The cap's evictions are removals like any other.
+    crate::attention::cleared_marks(state.manager.events(), &marked.evicted);
     let title = state
         .store
         .cached_session(origin.host, session_id)
@@ -1343,16 +1348,6 @@ async fn notify_blocked(
         .map(|info| info.title)
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| session_id.to_owned());
-    state
-        .store
-        .record_agent_blocked(
-            key,
-            served_id,
-            title.clone(),
-            reason.clone(),
-            Arc::clone(state.manager.events()),
-        )
-        .await?;
     state.ntfy.enqueue_blocked(title, origin.host, reason);
     Ok(AgentReply::Notified {})
 }
@@ -5044,6 +5039,8 @@ fn agent_row_of_mutation(
         // Likewise never read: notifications are a human-viewer surface.
         notifications_read_through: 0,
         stale,
+        // Never read either: the agent-facing projection carries no blocked mark.
+        blocked: false,
     };
     agent_session(&row, host_name, asking_host, asking_session)
 }
@@ -5806,6 +5803,7 @@ mod tests {
             activity_order_hold: None,
             notifications_read_through: 0,
             stale: false,
+            blocked: false,
         }
     }
 
@@ -6292,14 +6290,31 @@ mod tests {
         assert!(notify_reason(&"x".repeat(cap + 1)).is_err());
     }
 
-    /// SPEC.md: `farhelm agent notify` concerns the asking session only, asks nobody, and always reaches the bell.
-    /// Specified: on a fleet whose local session `local-live` is listed, a Notify from it with a reason answers
-    /// `Notified` and leaves one blocked notice for the local host naming `local-live` by its served id, its title and the cleaned
-    /// reason; an empty reason is refused as an invalid request and records nothing more.
+    /// SPEC.md: `farhelm agent notify` concerns the asking session only, asks nobody, and always reaches the session
+    /// list, whatever the ntfy settings say; the notifications bell no longer carries it. Specified: on a fleet whose
+    /// local session `local-live` is listed, a Notify from it answers `Notified`, marks exactly that
+    /// session blocked (its listing row says so, its neighbour's does not, and its raw status is untouched) and
+    /// writes no notice; an empty reason is refused as an invalid request and marks nothing, here a second session;
+    /// a Notify from a session the helm has not listed yet (one that has only just started) still marks it.
     #[farhelm_testtrace::test]
-    async fn notify_records_a_bell_notice_for_the_asking_session() {
+    async fn notify_marks_the_asking_session_blocked_and_writes_no_notice() {
         let (h, local, _remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
+        let list = || async {
+            crate::aggregate::session_list(
+                &h.manager,
+                &h.store,
+                &crate::store::SessionFilter::default().host(local),
+                crate::store::ListSort::Created,
+            )
+            .await
+            .unwrap()
+            .sessions
+        };
+        assert!(
+            list().await.iter().all(|row| !row.blocked),
+            "the premise: nothing is blocked yet"
+        );
         let outcome = handler
             .handle(
                 origin_of(&h, local),
@@ -6318,21 +6333,28 @@ mod tests {
             ),
             "{outcome:?}"
         );
-        let notices = h.store.notices().await.unwrap().notices;
-        assert_eq!(notices.len(), 1, "{notices:?}");
-        assert_eq!(notices[0].host, Some(local));
+        let rows = list().await;
+        let row = |id: &str| {
+            rows.iter()
+                .find(|row| row.info.id == id)
+                .unwrap_or_else(|| panic!("{id} is listed: {rows:?}"))
+        };
+        assert!(row("local-live").blocked);
         assert_eq!(
-            notices[0].content,
-            farhelm_proto::notices::NoticeContent::AgentBlocked {
-                session_id: full_id(&h, local, "local-live"),
-                session_title: "local-live".into(),
-                reason: "tests: need a decision".into(),
-            }
+            row("local-live").info.status,
+            farhelm_proto::SessionStatus::Running,
+            "the raw status stays what the supervisor reported"
         );
+        assert!(!row("local-old").blocked);
+        assert!(
+            h.store.notices().await.unwrap().notices.is_empty(),
+            "the bell no longer carries the report"
+        );
+
         let refused = handler
             .handle(
                 origin_of(&h, local),
-                "local-live",
+                "local-old",
                 AgentVerb::Notify {
                     reason: "   ".into(),
                 },
@@ -6348,79 +6370,41 @@ mod tests {
             ),
             "{refused:?}"
         );
-        assert_eq!(h.store.notices().await.unwrap().notices.len(), 1);
-    }
+        let local_old = crate::store::SessionKey::new(local, "local-old");
+        assert!(
+            h.store
+                .blocked_sessions(std::slice::from_ref(&local_old))
+                .await
+                .unwrap()
+                .is_empty(),
+            "a refused Notify marks nothing"
+        );
 
-    /// The bell names the blocked session by the title the user knows it by, and a session the helm has not cached yet
-    /// (one that has only just started) must still be named somehow. Specified: on a local host listing "local-live"
-    /// titled "Build console", a Notify from "local-live" records that title, and one from "never-listed", which the
-    /// cache does not hold, records "never-listed" as the title.
-    #[farhelm_testtrace::test]
-    async fn notify_names_the_session_by_its_cached_title_or_else_its_id() {
-        let h = FleetBuilder::new()
-            .await
-            .local(HostScript {
-                identity: Some("identity-local".to_string()),
-                sessions: vec![SessionInfo {
-                    title: "Build console".into(),
-                    ..scripted("local-live", 30, farhelm_proto::AgentKind::Claude)
-                }],
-                ..HostScript::default()
-            })
-            .await
-            .start()
+        let unlisted = handler
+            .handle(
+                origin_of(&h, local),
+                "never-listed",
+                AgentVerb::Notify {
+                    reason: "blocked".into(),
+                },
+            )
             .await;
-        let local = local_id(&h.store).await;
-        h.await_refreshed(local).await;
-        let handler = HelmAgentRequests::for_state(&h.state);
-        for session in ["local-live", "never-listed"] {
-            let outcome = handler
-                .handle(
-                    origin_of(&h, local),
-                    session,
-                    AgentVerb::Notify {
-                        reason: "blocked".into(),
-                    },
-                )
-                .await;
-            assert!(
-                matches!(
-                    outcome,
-                    AgentOutcome::Ok {
-                        reply: AgentReply::Notified {}
-                    }
-                ),
-                "{session}: {outcome:?}"
-            );
-        }
-        let titles: std::collections::BTreeMap<String, String> = h
-            .store
-            .notices()
-            .await
-            .unwrap()
-            .notices
-            .into_iter()
-            .filter_map(|notice| match notice.content {
-                farhelm_proto::notices::NoticeContent::AgentBlocked {
-                    session_id,
-                    session_title,
-                    ..
-                } => Some((session_id, session_title)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            titles,
-            std::collections::BTreeMap::from([
-                (
-                    full_id(&h, local, "local-live"),
-                    "Build console".to_string()
-                ),
-                (
-                    full_id(&h, local, "never-listed"),
-                    "never-listed".to_string()
-                ),
-            ])
+        assert!(
+            matches!(
+                unlisted,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Notified {}
+                }
+            ),
+            "{unlisted:?}"
+        );
+        let never_listed = crate::store::SessionKey::new(local, "never-listed");
+        assert!(
+            h.store
+                .blocked_sessions(std::slice::from_ref(&never_listed))
+                .await
+                .unwrap()
+                .contains(&never_listed)
         );
     }
 

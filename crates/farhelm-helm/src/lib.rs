@@ -107,6 +107,9 @@ pub use client::{
 /// The merged multi-host session list, served whole — what
 /// `GET /api/sessions` is built out of.
 mod aggregate;
+/// The user's attention to one session: the attention route, the terminal
+/// input hook, and the blocked mark they clear.
+mod attention;
 
 /// Answers to questions an agent asks from inside its own session, which
 /// reach this process as upcalls on the supervisor connections it opened.
@@ -455,6 +458,8 @@ struct AppState {
     approvals: approvals::Approvals,
     /// Questions for this helm only, shared with the connection attempts that own their replies.
     ssh_questions: Arc<askpass::Questions>,
+    /// The terminal input path's blocked-mark clears in flight or recently failed, per session (`attention::Clears`).
+    attention: attention::Clears,
 }
 
 impl AppState {
@@ -537,6 +542,7 @@ impl AppState {
             feedback: feedback::FeedbackForwarder::offline(),
             approvals: approvals::Approvals::new(farhelm_proto::approvals::APPROVAL_WAIT),
             ssh_questions: Arc::default(),
+            attention: attention::Clears::default(),
         }
     }
 }
@@ -612,6 +618,10 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/sessions/{id}/seen",
             axum::routing::put(sessions::mark_seen),
+        )
+        .route(
+            "/api/sessions/{id}/attention",
+            axum::routing::post(attention::attention),
         )
         .route(
             "/api/sessions/{id}/pin",

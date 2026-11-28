@@ -3549,8 +3549,9 @@ mod tests {
             // 54's `registry_namespace`, schema 70's `tensorlake_account`,
             // schema 71's `tensorlake_recipes`, schema 75's `credentials`,
             // schema 84's provider-neutral launch history and host preference,
-            // schema 86's `session_mutes`, and schema 87's session groups
-            // (members first, since they reference the groups).
+            // schema 86's `session_mutes`, schema 87's session groups
+            // (members first, since they reference the groups), and schema
+            // 105's `session_blocked`.
             // A new table that is missing here fails the DDL comparison
             // below, not a migration.
             // Every later preference column also goes, including nullable
@@ -3578,6 +3579,7 @@ mod tests {
                  DROP TABLE session_mutes;
                  DROP TABLE session_group_members;
                  DROP TABLE session_groups;
+                 DROP TABLE session_blocked;
                  -- Schema 101 added the opt-out from network announcement checks.
                  ALTER TABLE preferences DROP COLUMN check_announcements;
                  -- Schema 95 added the remembered dismissals of the hook setup prompt and hint.

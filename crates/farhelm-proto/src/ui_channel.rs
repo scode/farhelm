@@ -543,7 +543,8 @@ pub struct SessionQuery {
 /// Session references stay bare while filtering and sorting; REST and agent
 /// projections add this row's captured entry prefix only when building output.
 /// Other fields retain what the supervisor reported, zeroes included.
-/// `?sort=activity` groups by connected Running/Waiting first and then
+/// `?sort=activity` groups by connected Running/Waiting (Waiting including a
+/// blocked row, [`SessionRow::effectively_waiting`]) first and then
 /// applies `effective_work_started_at`, whose zero fallback is creation in
 /// milliseconds; row age applies `effective_activity`, whose zero fallback
 /// is creation in seconds. Neither derived value is written back, because a
@@ -641,6 +642,24 @@ pub struct SessionRow {
     /// none left shows no bell.
     #[serde(default)]
     pub notifications_read_through: u64,
+    /// Whether the session's agent said it is blocked (`farhelm agent notify`) and nothing has cleared that since:
+    /// the user switching to the session or typing into it, or the session ending, disappearing, stopping, restarting,
+    /// being replaced or being deleted (SPEC.md, Status). A helm-owned fact beside the supervisor's report, never
+    /// written into `info.status`, so lifecycle guards keep reading the raw status; the waiting presentation, the
+    /// Activity order and the Waiting filter read the two together through
+    /// [`SessionStatus::effectively_waiting`](crate::SessionStatus::effectively_waiting) ([`Self::effectively_waiting`]).
+    /// Older helms omit the field and read as not blocked.
+    #[serde(default)]
+    pub blocked: bool,
+}
+
+impl SessionRow {
+    /// Whether this row reads as waiting on the user: a waiting status from the supervisor, or a live or unclassified
+    /// session whose agent said it is blocked ([`Self::blocked`]). Staleness is the caller's to weigh, as it is for the
+    /// raw status.
+    pub fn effectively_waiting(&self) -> bool {
+        self.info.status.effectively_waiting(self.blocked)
+    }
 }
 
 /// A helm-owned session group, shared across filtered lists and clients.
