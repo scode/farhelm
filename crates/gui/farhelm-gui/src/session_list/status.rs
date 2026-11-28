@@ -304,7 +304,17 @@ pub(crate) fn pulses(row: &SessionRow) -> bool {
 
 /// The live mark `row` draws, or `None` for a status that draws no mark (an ended one, or one nobody classified).
 /// Visible to the crate for the session pane's details bar, which draws the list's own mark.
+///
+/// A session whose agent said it is blocked (`farhelm agent notify`, [`SessionRow::blocked`]) draws the waiting mark,
+/// whatever live or unclassified status its supervisor reports: the one effective-waiting rule
+/// ([`SessionRow::effectively_waiting`]) the helm's order and filter use too. Every surface that draws a session's
+/// status asks here (the row, the collapsed group's mark, the quick switcher, the menu header, the details bar), so a
+/// blocked session reads as waiting on all of them. The raw status stays what lifecycle guards read.
 pub(crate) fn live(row: &SessionRow) -> Option<Live> {
+    if row.effectively_waiting() {
+        return Some(Live::Waiting);
+    }
+    // The early return answers every waiting row; the Waiting arm below stays so the match keeps naming every status.
     match &row.info.status {
         SessionStatus::Running => Some(Live::Running),
         SessionStatus::Waiting => Some(Live::Waiting),

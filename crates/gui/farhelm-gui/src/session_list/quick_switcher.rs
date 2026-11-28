@@ -51,8 +51,9 @@
 //!   opens with that name ([`super::open_new`]) and takes the opener as its own, so closing New returns focus to where
 //!   it was before the switcher opened. A refused New (a launch pending) leaves focus there and opens nothing, as the
 //!   old switcher did.
-//! - **Picking.** A pick closes the switcher, then opens the session through the list's own [`selection::choose`], so
-//!   it is selected, remembered with the helm and its terminal takes focus, the already open session's included
+//! - **Picking.** A pick closes the switcher, then opens the session through the list's own [`selection::switch_to`],
+//!   the user's own switch, so it is selected, remembered with the helm (and, when it reads as waiting, the helm hears
+//!   the user attended to it) and its terminal takes focus, the already open session's included
 //!   (SPEC.md, "Where focus rests": "Choosing a session, including the one already selected, focuses its terminal").
 //!   It closes first because a terminal never takes focus from inside a layer ([`crate::focus::choose_terminal`]). A
 //!   pick goes ahead while a session action is pending; nothing here asks the operation store. Once the session is
@@ -824,7 +825,7 @@ impl QuickSwitcher {
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
         }
-        selection::choose(&row.info.id, cx);
+        selection::switch_to(&row.info.id, Some(row), window, cx);
         let _ = self
             .list
             .update(cx, |list, cx| list.picked_from_switcher(row, cx));

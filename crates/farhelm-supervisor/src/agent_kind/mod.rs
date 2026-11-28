@@ -3169,9 +3169,9 @@ mod tests {
     }
 
     /// Pin the launch capability independently of the drift suite's inventory so lost delivery also fails a test, and
-    /// pin `AgentKind::supports_instruction_injection`, which Settings words the blocked switch's supported agents
-    /// from, to what each integration's start expansion actually carries. Specified: for every kind, the start
-    /// expansion differs with instructions on and off exactly when `supports_instruction_injection` says so.
+    /// pin `AgentKind::supports_instruction_injection`, which Settings names the agents under "Ask agents to notify
+    /// when blocked" from, to what each integration's start expansion actually carries. Specified: for every kind, the
+    /// start expansion differs with instructions on and off exactly when `supports_instruction_injection` says so.
     #[test]
     fn instruction_delivery_follows_the_start_expansion() {
         for &kind in AgentKind::ALL {

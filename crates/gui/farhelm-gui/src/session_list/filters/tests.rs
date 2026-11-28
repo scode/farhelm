@@ -764,3 +764,31 @@ fn a_pick_is_hidden_by_the_answered_listing_or_else_by_its_row() {
     );
     assert!(pick_hidden(&answered, &cut, &row("a", 2, "waiting")));
 }
+
+/// The Waiting segment promises the sessions that need the user, and a session whose agent said it is blocked
+/// (`farhelm agent notify`) is one, so the local answer (a switcher pick while a query is in flight, say) must count it
+/// as waiting, as the helm's own filter does, and the three live segments must stay disjoint. Specified: a blocked
+/// running, idle or unclassified row is shown under Waiting and All and hidden under Running and Idle; a blocked row
+/// that exited is shown under All alone; unblocked rows keep their own segment.
+#[test]
+fn a_blocked_row_shows_under_waiting_and_never_under_running_or_idle() {
+    let shows = |state: &str, blocked: bool| {
+        let fixture = session("a").status(json!({ "state": state }));
+        let row = if blocked { fixture.blocked() } else { fixture }.row();
+        Status::SEGMENTS.map(|segment| segment.shows(&row))
+    };
+    // In segment order: All, Running, Waiting, Idle.
+    for state in ["running", "idle", "unknown"] {
+        assert_eq!(shows(state, true), [true, false, true, false], "{state}");
+    }
+    let exited = session("a")
+        .status(json!({ "state": "exited", "exit_code": 0 }))
+        .blocked()
+        .row();
+    assert_eq!(
+        Status::SEGMENTS.map(|segment| segment.shows(&exited)),
+        [true, false, false, false]
+    );
+    assert_eq!(shows("running", false), [true, true, false, false]);
+    assert_eq!(shows("idle", false), [true, false, false, true]);
+}

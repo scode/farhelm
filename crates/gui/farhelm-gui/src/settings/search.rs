@@ -165,6 +165,12 @@ impl Entry {
             (Section::Notifications, Target::Choice(Choice::CheckAnnouncements)) => "news",
             (Section::Notifications, Target::Choice(_)) => "sound bell",
             (Section::Notifications, Target::Top) if self.id == SOUNDS_ID => "sound bell",
+            // The Blocked agents card works without push alerts, so it is not found by "phone".
+            (
+                Section::Notifications,
+                Target::NtfySwitch(ntfy::Switch::AskAgents)
+                | Target::NtfyField(ntfy::Field::Criteria),
+            ) => "agent instructions",
             (Section::Notifications, _) => "push phone",
             (Section::App, _) => "update upgrade version",
             (Section::CustomAgent(_) | Section::AddCustomAgent, _) => {
@@ -395,6 +401,23 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                 }
             }
             Section::Notifications => {
+                // The Blocked agents card first, as drawn: its switch, found by "notify" and "blocked" through its
+                // words and the card's note, then its criteria field.
+                let (id, label, help) = ntfy::Switch::AskAgents.words();
+                entries.push(add(
+                    id,
+                    label,
+                    &[help, ntfy::BLOCKED_INTRO],
+                    Target::NtfySwitch(ntfy::Switch::AskAgents),
+                ));
+                let (id, label, help) = ntfy::Field::Criteria.words();
+                entries.push(Entry::new(
+                    section.clone(),
+                    id,
+                    label,
+                    [help, ntfy::BLOCKED_INTRO],
+                    Target::NtfyField(ntfy::Field::Criteria),
+                ));
                 let switch = |switch: ntfy::Switch| {
                     let (id, label, help) = switch.words();
                     add(id, label, &[help, ntfy::INTRO], Target::NtfySwitch(switch))
@@ -415,7 +438,8 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         ntfy::Field::Server => &[],
                         ntfy::Field::Topic => &[ntfy::TOPIC_HELP],
                         ntfy::Field::Token => &[ntfy::TOKEN_CHANGED_HELP, ntfy::TOKEN_CLEAR_HELP],
-                        ntfy::Field::Criteria => &[ntfy::BLOCKED_HELP],
+                        // Listed with its card above.
+                        ntfy::Field::Criteria => continue,
                     };
                     entries.push(Entry::new(
                         section.clone(),

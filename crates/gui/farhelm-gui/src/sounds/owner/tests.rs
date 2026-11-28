@@ -323,6 +323,64 @@ fn the_open_session_is_quiet_while_its_window_is_active(cx: &mut TestAppContext)
     );
 }
 
+/// A blocked agent's report is a wait like a detected question, so it must ring the waiting chime under the same rules
+/// (the acceptance criteria: "play `Sound::Waiting`, respecting Sounds → Waiting and quiet-active-session rules").
+/// Specified: with `a` open in an active window, `b` becoming blocked while still running plays the waiting sound once,
+/// and staying blocked plays nothing more; `a`, the quiet session, becoming blocked plays nothing; with the waiting
+/// switch off, another session becoming blocked plays nothing.
+#[gpui::test]
+fn a_session_becoming_blocked_rings_the_waiting_sound(cx: &mut TestAppContext) {
+    let rows = [
+        in_state("a", "running"),
+        in_state("b", "running"),
+        in_state("c", "running"),
+    ];
+    let (mut helm, cx, recorder) = open(cx, &rows, &[], row(None, None, None), true);
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+
+    let blocked_b = [
+        in_state("a", "running"),
+        in_state("b", "running").blocked(),
+        in_state("c", "running"),
+    ];
+    push_listing(&mut helm, &blocked_b, &[], cx);
+    assert_eq!(recorder.heard(), [Sound::Waiting]);
+    push_listing(&mut helm, &blocked_b, &[], cx);
+    assert_eq!(recorder.heard(), NOTHING, "still blocked is no new edge");
+
+    let blocked_a = [
+        in_state("a", "running").blocked(),
+        in_state("b", "running").blocked(),
+        in_state("c", "running"),
+    ];
+    push_listing(&mut helm, &blocked_a, &[], cx);
+    assert_eq!(
+        recorder.heard(),
+        NOTHING,
+        "the open session in an active window"
+    );
+
+    let off = preferences_state(row(Some(false), None, None));
+    helm.push(CollectionChanges {
+        collection: off.collection,
+        meta: off.meta,
+        upsert: off.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    push_listing(
+        &mut helm,
+        &[
+            in_state("a", "running").blocked(),
+            in_state("b", "running").blocked(),
+            in_state("c", "running").blocked(),
+        ],
+        &[],
+        cx,
+    );
+    assert_eq!(recorder.heard(), NOTHING, "Sounds → Waiting off");
+}
+
 // ---- The sidebar's view ----------------------------------------------------------------------------------------------
 
 /// SPEC.md: "Status sounds follow the sidebar's current host selector and filters; changing that view silently records

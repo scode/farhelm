@@ -43,11 +43,13 @@ When ready to receive automatic alerts, turn on **Enable ntfy alerts**, keep **A
 select **Save**. That switch says which agents Farhelm can tell are waiting for you; with other agents, sessions never
 show as waiting, so they never send this alert. A line beside **Send test** says when alerts are saved off or the form has
 unsaved changes: a test alert arriving only shows that the server and topic work. Turn on **Agent is blocked** as well to
-get an alert when an agent runs `farhelm agent notify` to say it cannot finish what you asked; its session counts as
-waiting in your session list either way ([What the statuses mean](#what-the-statuses-mean)). With it on, Farhelm also
-asks the agents the switch names to run that command instead of stopping silently, in sessions you start or restart
-after saving. Under the switch you can describe in your own words what counts as blocked; while the box is empty,
-Farhelm's own description, shown below it, is used.
+get an alert when an agent runs `farhelm agent notify` to say it cannot finish what you asked; its session shows as
+waiting in your session list either way ([What the statuses mean](#what-the-statuses-mean)).
+
+Whether agents are asked to run that command is up to you, with or without ntfy: in the **Blocked agents** card above
+**ntfy alerts**, **Ask agents to notify when blocked** asks the agents it names to run it instead of stopping silently,
+in sessions you start or restart after saving. Under the switch you can describe in your own words what counts as
+blocked; while the box is empty, Farhelm's own description, shown below it, is used.
 
 Choose a hard-to-guess topic and keep it private: anyone who knows an ntfy.sh topic can read its alerts. An alert
 contains the session's title and host, so avoid sensitive text in titles if you do not want it sent to that server.
@@ -131,10 +133,11 @@ Waiting is the status worth watching for: the agent has stopped to ask you somet
 does nothing until you answer. Not every agent can tell Farhelm when it is waiting; [Supported agents](/docs/agents/)
 says which ones can.
 
-An agent that cannot finish what you asked can also say so itself, with `farhelm agent notify`. Its session then counts
-as waiting: it sorts with the sessions at work when the list is ordered by most recent activity, and the **Waiting**
-filter shows it. It counts as waiting until you switch to the session or type into it, or the session stops, restarts,
-ends or is deleted. The agent explains what it needs in its own terminal.
+An agent that cannot finish what you asked can also say so itself, with `farhelm agent notify`. Its session then shows
+as waiting, exactly as if it had asked you a question: a red waiting dot, the waiting sound, a place with the sessions at
+work when the list is ordered by most recent activity, and a place under the **Waiting** filter, even while it is
+[muted](#mute-a-session). It stays waiting until you switch to the session or type into it, or the session stops,
+restarts, ends or is deleted. The agent explains what it needs in its own terminal.
 
 An agent can also be waiting on Farhelm itself, when it asks to start, stop, change, or delete a session, or to add,
 change, or remove a host, with the `farhelm` command. That request shows as a compact card near the top of the window, not in the session list, and you answer it on

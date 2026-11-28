@@ -67,11 +67,20 @@ pub struct Settings {
     /// own criteria follows every later change to Farhelm's default wording instead of keeping a copy of an old one.
     #[serde(default)]
     pub custom_blocked_criteria: Option<String>,
+    /// Whether the agents Farhelm starts are asked to run `farhelm agent notify` when they are blocked (the
+    /// blocked-agent instruction), independently of ntfy: the session list shows a blocked session as waiting whether
+    /// or not any alert goes out. `None` is a configuration saved before the choice had its own switch, which asked
+    /// exactly while ntfy alerts and their blocked switch were both on; [`Settings::asks_agents_when_blocked`] keeps
+    /// that meaning, so an upgrade changes no running behavior. To decide whether to ask, read it through that method;
+    /// only a save, which must keep an absent value absent, reads the field itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_agents_when_blocked: Option<bool>,
 }
 
-/// The blocked-agent instruction's first part, always given while blocked alerts are on: what to run and the intent,
-/// which is not to make the agent try harder, only to keep it from stopping silently. The maintainer settled this
-/// wording in the plan `agent-blocked-notifications`; change it deliberately.
+/// The blocked-agent instruction's first part, always given while agents are asked to notify when blocked
+/// ([`Settings::asks_agents_when_blocked`]): what to run and the intent, which is not to make the agent try harder,
+/// only to keep it from stopping silently. The maintainer settled this wording in the plan
+/// `agent-blocked-notifications`; change it deliberately.
 pub const BLOCKED_INSTRUCTION_FRAMING: &str = "farhelm: If you are going to stop without completing what the user \
      asked because you are blocked, do not stop silently \u{2014} run `farhelm agent notify \"<what is blocked \
      (briefly)>: <why is it blocked (briefly)>\"` before ending your turn so the user is notified right away. Do not \
@@ -88,12 +97,12 @@ pub const DEFAULT_BLOCKED_CRITERIA: &str = "you cannot finish what the user aske
 /// The most characters custom criteria may have once normalized ([`normalize_blocked_criteria`]).
 pub const BLOCKED_CRITERIA_CAP: usize = 1000;
 
-/// The blocked-agent instruction for the agents Farhelm starts under `settings`, or `None` while blocked alerts are
-/// off: [`BLOCKED_INSTRUCTION_FRAMING`], then "What counts as blocked: " and the user's criteria or
-/// [`DEFAULT_BLOCKED_CRITERIA`]. The one source of the instruction the helm sends with each create and Restart; the
-/// desktop shows the same default criteria constant.
+/// The blocked-agent instruction for the agents Farhelm starts under `settings`, or `None` while agents are not asked
+/// to notify ([`Settings::asks_agents_when_blocked`]): [`BLOCKED_INSTRUCTION_FRAMING`], then "What counts as blocked: "
+/// and the user's criteria or [`DEFAULT_BLOCKED_CRITERIA`]. The one source of the instruction the helm sends with each
+/// create and Restart; the desktop shows the same default criteria constant.
 pub fn blocked_instructions(settings: &Settings) -> Option<String> {
-    (settings.enabled && settings.notify_blocked).then(|| {
+    settings.asks_agents_when_blocked().then(|| {
         let criteria = settings
             .custom_blocked_criteria
             .as_deref()
@@ -133,6 +142,7 @@ impl Default for Settings {
             notify_waiting: true,
             notify_blocked: false,
             custom_blocked_criteria: None,
+            ask_agents_when_blocked: None,
         }
     }
 }
@@ -146,9 +156,16 @@ impl Settings {
     }
 
     /// Whether the helm should send an ntfy alert when an agent says it is blocked: the master switch, the blocked
-    /// switch and a topic. The bell notice does not depend on this.
+    /// switch and a topic. The session's blocked mark does not depend on this.
     pub fn sends_blocked_alerts(&self) -> bool {
         self.enabled && self.notify_blocked && !self.topic.is_empty()
+    }
+
+    /// Whether the agents Farhelm starts are asked to notify when blocked: the stored choice, or, for a configuration
+    /// saved before the choice existed, what it did then, while ntfy alerts and their blocked switch were both on.
+    pub fn asks_agents_when_blocked(&self) -> bool {
+        self.ask_agents_when_blocked
+            .unwrap_or(self.enabled && self.notify_blocked)
     }
 }
 
@@ -177,6 +194,10 @@ pub struct SaveSettings {
     /// default; other text is the user's own criteria.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_blocked_criteria: Option<String>,
+    /// See [`Settings::ask_agents_when_blocked`]. Absent keeps the stored choice, as for `notify_waiting`, so a client
+    /// older than the switch neither turns the instruction on nor off; a client that has the switch always sends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_agents_when_blocked: Option<bool>,
 }
 
 #[cfg(test)]
@@ -205,9 +226,10 @@ mod tests {
     }
 
     /// The blocked-agent instruction is the maintainer's settled wording, and a configuration that never chose its
-    /// own criteria must follow Farhelm's default rather than keep a copy. Specified: off while either the master or
-    /// the blocked switch is off; on, the framing and "What counts as blocked: " followed by the default criteria when
-    /// none are chosen, or by the chosen text; the framing names `farhelm agent notify` and says not to try harder.
+    /// own criteria must follow Farhelm's default rather than keep a copy. Specified: with no stored choice, off while
+    /// either the master or the blocked switch is off; a stored choice decides on its own, whatever those switches say;
+    /// on, the framing and "What counts as blocked: " followed by the default criteria when none are chosen, or by the
+    /// chosen text; the framing names `farhelm agent notify` and says not to try harder.
     #[test]
     fn the_blocked_instruction_is_the_framing_and_the_chosen_criteria() {
         let on = Settings {
@@ -243,6 +265,23 @@ mod tests {
         ] {
             assert_eq!(blocked_instructions(&off), None);
         }
+        // The explicit choice decides, whatever ntfy's own switches say.
+        assert!(
+            blocked_instructions(&Settings {
+                enabled: false,
+                notify_blocked: false,
+                ask_agents_when_blocked: Some(true),
+                ..on.clone()
+            })
+            .is_some()
+        );
+        assert_eq!(
+            blocked_instructions(&Settings {
+                ask_agents_when_blocked: Some(false),
+                ..on.clone()
+            }),
+            None
+        );
         // The maintainer's settled wording (the plan `agent-blocked-notifications`), spelled out in full so an edit to
         // either constant fails here rather than reaching agents unnoticed.
         assert_eq!(
@@ -282,6 +321,43 @@ mod tests {
         assert_eq!(normalize_blocked_criteria(" \n ").unwrap(), None);
         assert!(normalize_blocked_criteria(&"x".repeat(BLOCKED_CRITERIA_CAP)).is_ok());
         assert!(normalize_blocked_criteria(&"x".repeat(BLOCKED_CRITERIA_CAP + 1)).is_err());
+    }
+
+    /// A configuration saved before "Ask agents to notify when blocked" had its own switch must keep asking exactly
+    /// when it did, so an upgrade changes nothing, and a stored choice must win over ntfy's switches either way, so
+    /// the instruction works without ntfy. Specified: absent, the choice reads as on only with ntfy alerts and their
+    /// blocked switch both on; stored, it reads as stored whatever those switches are; it is left off the wire while
+    /// absent, and a save without it decodes as none.
+    #[test]
+    fn asking_agents_when_blocked_upgrades_from_the_ntfy_switches() {
+        for (enabled, notify_blocked) in
+            [(true, true), (true, false), (false, true), (false, false)]
+        {
+            let old = Settings {
+                enabled,
+                notify_blocked,
+                ..Settings::default()
+            };
+            assert_eq!(
+                old.asks_agents_when_blocked(),
+                enabled && notify_blocked,
+                "{enabled} {notify_blocked}"
+            );
+            for chosen in [true, false] {
+                let new = Settings {
+                    ask_agents_when_blocked: Some(chosen),
+                    ..old.clone()
+                };
+                assert_eq!(new.asks_agents_when_blocked(), chosen);
+            }
+        }
+        let wire = serde_json::to_value(Settings::default()).unwrap();
+        assert!(wire.get("ask_agents_when_blocked").is_none(), "{wire}");
+        let save: SaveSettings = serde_json::from_str(
+            r#"{"enabled":true,"server_url":"https://ntfy.sh","topic":"t","priority":"default","token":null}"#,
+        )
+        .unwrap();
+        assert_eq!(save.ask_agents_when_blocked, None);
     }
 
     /// The waiting policy tracks spells only while alerts can actually go out. Specified: on only with the master

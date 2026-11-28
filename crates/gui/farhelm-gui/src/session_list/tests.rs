@@ -92,6 +92,8 @@ pub(crate) struct Fixture {
     pin: Option<i64>,
     /// The shared mute served by the helm, including an indefinite mute.
     mute: Option<farhelm_proto::SessionMute>,
+    /// Whether the helm reports the session blocked (`farhelm agent notify`, `SessionRow::blocked`).
+    blocked: bool,
     /// Group membership makes sense only with a group in the fixture roster.
     group: Option<i64>,
     /// The agent kind the supervisor recorded, in the helm's wire form (`generic` for a command it knows nothing
@@ -129,6 +131,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         no_launch_repository: false,
         pin: None,
         mute: None,
+        blocked: false,
         group: None,
         agent_kind: None,
         hook_setup: None,
@@ -256,6 +259,11 @@ impl Fixture {
         self.mute = Some(farhelm_proto::SessionMute { until });
         self
     }
+    /// The helm reports this session blocked: its agent ran `farhelm agent notify` and nothing has cleared that.
+    pub(crate) fn blocked(mut self) -> Self {
+        self.blocked = true;
+        self
+    }
     /// The session recorded as an agent of `kind` (`"generic"` for a plain command, which the menu header then names by
     /// its program).
     pub(crate) fn agent_kind(mut self, kind: &'static str) -> Self {
@@ -316,6 +324,7 @@ impl Fixture {
         value["pinned"] = json!(self.pin.is_some());
         value["pin_position"] = json!(self.pin);
         value["mute"] = json!(self.mute);
+        value["blocked"] = json!(self.blocked);
         value["group"] = json!(self.group);
         if self.no_launch_repository {
             value["github_repo"] = Value::Null;

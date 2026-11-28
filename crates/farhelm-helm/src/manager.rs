@@ -10283,6 +10283,7 @@ mod tests {
             notify_waiting: Some(true),
             notify_blocked: Some(false),
             custom_blocked_criteria: None,
+            ask_agents_when_blocked: None,
             enabled: true,
             server_url: "https://ntfy.example".into(),
             topic: "deadline-tests".into(),

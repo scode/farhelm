@@ -187,6 +187,9 @@ pub(crate) mod summary;
 pub(crate) use row::abbreviate_home;
 
 #[cfg(test)]
+mod blocked_tests;
+
+#[cfg(test)]
 mod bulk_tests;
 
 #[cfg(test)]

@@ -160,14 +160,17 @@ impl Status {
         &ROWS[self as usize]
     }
 
-    /// Whether the helm lists a session in `status` under this choice: every session under All, else only an exact
-    /// match, so an ended or unclassified session shows under All alone.
-    fn shows(self, status: &SessionStatus) -> bool {
+    /// Whether the helm lists `row` under this choice: every session under All, else only an exact match of its
+    /// effective status, so an ended or unclassified session shows under All alone. A session whose agent said it is
+    /// blocked counts as waiting, never as running or idle ([`SessionRow::effectively_waiting`]), as the helm's own
+    /// `?status=` filter counts it, so the local answer and the helm's agree.
+    fn shows(self, row: &SessionRow) -> bool {
+        let waiting = row.effectively_waiting();
         match self {
             Status::All => true,
-            Status::Running => matches!(status, SessionStatus::Running),
-            Status::Waiting => matches!(status, SessionStatus::Waiting),
-            Status::Idle => matches!(status, SessionStatus::Idle),
+            Status::Running => !waiting && matches!(row.info.status, SessionStatus::Running),
+            Status::Waiting => waiting,
+            Status::Idle => !waiting && matches!(row.info.status, SessionStatus::Idle),
         }
     }
 }
@@ -525,7 +528,7 @@ pub(crate) fn pick_hidden(choice: &Choice, collections: &Collections, row: &Sess
             return true;
         }
     }
-    chosen.host.is_some_and(|host| row.host != host) || !chosen.status.shows(&row.info.status)
+    chosen.host.is_some_and(|host| row.host != host) || !chosen.status.shows(row)
 }
 
 /// The sentence for a refused query: the words [`operations::send`] hands over (the helm's, which may quote a host, in

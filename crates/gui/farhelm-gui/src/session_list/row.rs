@@ -525,7 +525,7 @@ pub(crate) fn row(
                 });
             }
         })
-        .on_click(move |event, _, cx| {
+        .on_click(move |event, window, cx| {
             let gesture = Gesture::from_modifiers(&event.modifiers());
             let _ = click_list.update(cx, |list, cx| {
                 if let ClickEvent::Mouse(mouse) = event
@@ -533,8 +533,9 @@ pub(crate) fn row(
                 {
                     return;
                 }
+                // A mouse click and a keyboard press on the row both arrive here, so both are the user's own switch.
                 if gesture == Gesture::Open {
-                    selection::choose(&click_key, cx);
+                    selection::switch_to(&click_key, None, window, cx);
                 }
                 list.row_clicked(&click_key, gesture, cx);
             });

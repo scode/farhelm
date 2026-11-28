@@ -21,6 +21,15 @@
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.
+//! - **The user's own switch is attention.** When the user switches to a session themselves ([`switch_to`]: a click
+//!   or keyboard press on its row, or a pick in the quick switcher) in an active window, and that session reads as
+//!   waiting ([`SessionRow::effectively_waiting`]; by the switcher's own row when the sidebar does not hold the
+//!   session), the helm is told the user attended to it
+//!   (`POST /api/sessions/{id}/attention`, `switch`), which clears a blocked mark its agent left (SPEC.md, "Status").
+//!   An automatic choice never says so: the session opening under the user is not evidence they looked at it. Nor does
+//!   a launch or a Replace opening its new session, which no agent can have marked yet. Choosing a session that does
+//!   not read as waiting sends nothing, so ordinary switching costs no traffic; a waiting session's switch still goes,
+//!   even when it is the session already open, since the user chose it again.
 //! - **Only the user's choice takes focus.** A click on a row ([`choose`]) hands the session and the click's mark to
 //!   the pane, whose terminal for that session then takes focus, also when the session was already open (SPEC.md,
 //!   "Where focus rests"). An automatic choice ([`open_automatically`]) does not: its terminal only becomes home, and
@@ -66,14 +75,14 @@
 //! fallback to the in-memory copy on a failed read has nothing to fall back from.
 
 use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
-use farhelm_proto::SessionSeenRequest;
 use farhelm_proto::ui_channel::{
     Availability, Collection, PREFERENCES_KEY, Preferences, SessionRow,
 };
-use gpui::App;
+use farhelm_proto::{SessionAttention, SessionAttentionRequest, SessionSeenRequest};
+use gpui::{App, Window};
 
 use crate::focus::Mark;
-use crate::local_state;
+use crate::{local_state, session, ticker};
 use crate::{operations, session_pane};
 
 /// One session with its row: the key the helm files it under, and the row. A listed session, or the open session the
@@ -299,6 +308,69 @@ pub(crate) fn choose(key: &str, cx: &mut App) {
     // Recorded before the selection changes, so the pane finds the choice whichever of the two it hears about first.
     session_pane::chosen(key, Mark::take(cx), cx);
     select(key, cx);
+}
+
+/// Open `key` because the user switched to it themselves in `window` (a click or keyboard press on its row, or a quick
+/// switcher pick): [`choose`] it, then, if `window` is active and the session reads as waiting, tell the helm the user
+/// attended to it (the module docs, "The user's own switch is attention").
+///
+/// `seen_as` is the row the caller picked from, when it has one of its own: the quick switcher reads every session on
+/// every host, while the store holds only what the sidebar's query returned and the open session, so a session the
+/// sidebar filters out or a cap cuts has no row there. The store's row wins when there is one, being the newer.
+pub(crate) fn switch_to(key: &str, seen_as: Option<&SessionRow>, window: &Window, cx: &mut App) {
+    let waiting = reads_waiting(key, seen_as, cx);
+    choose(key, cx);
+    if waiting {
+        attend(key, window, cx);
+    }
+}
+
+/// Whether `key` reads as waiting ([`SessionRow::effectively_waiting`]): by the store's row, or else by `seen_as`.
+fn reads_waiting(key: &str, seen_as: Option<&SessionRow>, cx: &App) -> bool {
+    let stored = session::current_store(cx).and_then(|store| {
+        store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(key)
+            .map(SessionRow::effectively_waiting)
+    });
+    stored.unwrap_or_else(|| seen_as.is_some_and(SessionRow::effectively_waiting))
+}
+
+/// Send the `switch` attention signal for `key`, the session the user just switched to while it read as waiting, if
+/// `window` is active ([`ticker::is_active`], which honors the test bridge's override). Sent unordered, since nothing
+/// else the window sends depends on it, and best effort like the seen mark: a lost one leaves the mark until the next
+/// switch or keystroke clears it, so a failure is logged, never shown.
+fn attend(key: &str, window: &Window, cx: &mut App) {
+    if !ticker::is_active(window, cx) {
+        return;
+    }
+    let path = match ApiPath::api(&["sessions", key, "attention"]) {
+        Ok(path) => path,
+        Err(error) => {
+            tracing::warn!(%error, "could not tell the helm the user switched to the session");
+            return;
+        }
+    };
+    let request = SessionAttentionRequest {
+        kind: SessionAttention::Switch,
+    };
+    operations::send_unordered(
+        Method::Post,
+        path,
+        // A unit enum in a struct always encodes, so `json!` cannot fail here.
+        Some(serde_json::json!(request)),
+        "POST /api/sessions/[session]/attention",
+        cx,
+        |answer, _| {
+            if let Err(reason) = answer {
+                tracing::warn!(
+                    ?reason,
+                    "could not tell the helm the user switched to the session"
+                );
+            }
+        },
+    );
 }
 
 /// Open `key` because the selection rules chose it: select it and remember it with the helm, as for a click, but move

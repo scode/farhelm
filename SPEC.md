@@ -2904,21 +2904,25 @@ The warnings follow the draft as typed, including when another entry is malforme
 current helm policy unchanged and shows the reason inline. Under **Notifications**, **Sounds** has four switches that
 save separate helm preferences (see Status). Each row has its own play button for hearing that sound once. **Check for
 announcements** is on by default on macOS and Linux. Turning it off stops the helm from requesting the network
-announcement feed. The switch is searchable and shared by windows on this helm. **ntfy alerts** has an off-by-default
-**Enable ntfy alerts** switch, under which an **Agent is waiting for an answer** switch (on by default, including for
-settings saved before it existed) chooses the waiting alert, and an off-by-default **Agent is blocked** switch chooses
-the alert an agent sends with `farhelm agent notify`, names the agents Farhelm asks to send it, and holds an optional
-**What counts as blocked** field, with Farhelm's own wording shown under it while it is empty and **Reset to default**
-once the user has typed their own (see the agent instructions below). The form also has a server URL (default
-`https://ntfy.sh`), a topic, an optional access token, and a priority (Min, Low, Default, High, Urgent; default
-Default). The waiting switch says which agents it covers, worded from what Farhelm can read on each built-in agent's
-screen: questions and approvals for some, only the folder-trust question for others, none for the rest. These ntfy
-settings are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals
-appear inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing
-it. Changing to another server clears a saved token unless a new one is entered, and the form says so before saving.
-**Send test** uses the saved configuration, even while disabled, and reports success or failure inline. Because a test
-that arrives proves only the server and topic, a line beside it says when the form has unsaved changes (alerts and the
-test still use the saved settings), when the saved master switch is off, or when the saved waiting switch is off. The
+announcement feed. The switch is searchable and shared by windows on this helm. **Blocked agents** has an **Ask agents
+to notify when blocked** switch, which decides whether the agents Farhelm starts are asked to run `farhelm agent notify`
+instead of stopping silently (see the agent instructions below) and names those agents, and an optional **What counts as
+blocked** field, with Farhelm's own wording shown under it while it is empty and **Reset to default** once the user has
+typed their own. It works with or without ntfy: a blocked session shows as waiting in the session list either way (see
+Status). Settings saved before the switch existed keep asking exactly when they did, while ntfy alerts and their blocked
+switch were both on. **ntfy alerts** has an off-by-default **Enable ntfy alerts** switch, under which an **Agent is
+waiting for an answer** switch (on by default, including for settings saved before it existed) chooses the waiting
+alert, and an off-by-default **Agent is blocked** switch chooses the alert an agent sends with `farhelm agent notify`.
+The two cards are one form with one Save. The form also has a server URL (default `https://ntfy.sh`), a topic, an
+optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). The waiting switch says which
+agents it covers, worded from what Farhelm can read on each built-in agent's screen: questions and approvals for some,
+only the folder-trust question for others, none for the rest. These ntfy settings are explicitly saved helm
+configuration, shared by every client, outside the preference row. Save refusals appear inline. The stored token is
+never returned: the form shows whether one exists and allows replacing or clearing it. Changing to another server clears
+a saved token unless a new one is entered, and the form says so before saving. **Send test** uses the saved
+configuration, even while disabled, and reports success or failure inline. Because a test that arrives proves only the
+server and topic, a line beside it says when the form has unsaved changes (alerts and the test still use the saved
+settings), when the saved master switch is off, or when the saved waiting and blocked switches are both off. The
 **Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a monospace multi-line
 post-clone command field and the default-on **Keep a checkout ready for faster launches** switch (see
 [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
@@ -3314,14 +3318,19 @@ alone never becomes a launch error: direct evidence from the launch shim can sti
 annotated exit commits. Host unreachability is per-host connection state, not a session status.
 
 An agent that is blocked and cannot finish what it was asked can say so (`farhelm agent notify`, see Agent-spawned
-sessions), and the helm then marks its session blocked. A blocked session counts as waiting in the session list's order
-and filters, mute included, while the status its supervisor reports stays as it is, so Restart, prompt delivery and the
-other rules that read the status are unchanged. The mark clears when the user switches to that session in an active
-Farhelm window or types, pastes, clicks or drags in its terminal (the app's own focus reports, pointer motion with no
-button held and wheel scrolling do not count, since they can reach a window the user is not using), and when the session
-stops, restarts, ends, is replaced or deleted, or no longer appears in its host's complete listing. It survives helm
-restarts, and a host keeps at most as many marks as its session listing can show. A waiting status the supervisor
-detected is separate and unaffected: it still clears only when the supervisor sees the question go.
+sessions), and the helm then marks its session blocked. A blocked session reads as waiting everywhere the app shows a
+status, exactly as a detected question does: the red waiting mark (and the word Waiting for screen readers) on its row,
+in the quick switcher and on the open session, the Activity order's active group, the Waiting filter (never Running or
+Idle), a collapsed group's mark, breaking through a mute, and the waiting sound under **Sounds → Waiting** and the
+open-session quiet rule. There is no banner and no extra hover text; the agent's own terminal says what it needs. The
+status its supervisor reports stays as it is, so Restart, prompt delivery and the other rules that read the status are
+unchanged. The mark clears when the user switches to that session themselves (a click or keyboard press on its row, or a
+quick switcher pick) in an active Farhelm window, not when it opens automatically, or types, pastes, clicks or drags in
+its terminal (the app's own focus reports, pointer motion with no button held and wheel scrolling do not count, since
+they can reach a window the user is not using), and when the session stops, restarts, ends, is replaced or deleted, or
+no longer appears in its host's complete listing. It survives helm restarts, and a host keeps at most as many marks as
+its session listing can show. A waiting status the supervisor detected is separate and unaffected: it still clears only
+when the supervisor sees the question go.
 
 After a supervisor restart, a live terminal keeps its last cached status while the supervisor gathers new screen
 evidence. The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch
@@ -4655,31 +4664,31 @@ be documented. Another accepted limitation is a custom Codex command that cannot
 follow the support window under "Supported user environments" rather than getting compatibility code.
 
 The other exception is farhelm's own, and it is deliberate rather than tolerated: on a launch that gets the hook, the
-hook prints exactly one line for the AGENT to read (and, while blocked alerts are on, the blocked-agent instruction
-after it; see below) — that `$farhelm <request>` in the user's message means "use the `farhelm agent` CLI", and that
-`farhelm agent instructions` explains the rest. Nothing reaches the user's terminal and nothing is written to disk. It
-is on by default, because an agent that has never heard of the CLI will not go looking for it, and
-`FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment removes it while leaving identity capture exactly as it
-was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it. The
-instructions themselves are printed only when that command is run, so a session where the user never mentions farhelm
-pays the pointer line (and, while blocked alerts are on, the blocked-agent instruction) and nothing more. Farhelm's Grok
-and Antigravity hooks omit `--announce` because they also run outside Farhelm. Both integrations leave out the
-instructions pointer. Antigravity always receives an empty JSON object and a newline on stdout, including when reporting
-fails.
+hook prints exactly one line for the AGENT to read (and, while agents are asked to notify when blocked, the
+blocked-agent instruction after it; see below) — that `$farhelm <request>` in the user's message means "use the
+`farhelm agent` CLI", and that `farhelm agent instructions` explains the rest. Nothing reaches the user's terminal and
+nothing is written to disk. It is on by default, because an agent that has never heard of the CLI will not go looking
+for it, and `FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment removes it while leaving identity capture
+exactly as it was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it.
+The instructions themselves are printed only when that command is run, so a session where the user never mentions
+farhelm pays the pointer line (and, while agents are asked to notify when blocked, the blocked-agent instruction) and
+nothing more. Farhelm's Grok and Antigravity hooks omit `--announce` because they also run outside Farhelm. Both
+integrations leave out the instructions pointer. Antigravity always receives an empty JSON object and a newline on
+stdout, including when reporting fails.
 
-While ntfy alerts and their **Agent is blocked** switch are on, sessions started or restarted from then on also get the
-blocked-agent instruction after the pointer, wherever the pointer is delivered (Claude, Codex, Muse, Goose, Pi and OMP;
-the blocked switch names them, from the same list the supervisor's delivery is tested against): if the agent is going to
-stop without finishing what the user asked because it is blocked, it should not stop silently but run
-`farhelm agent notify` first. It is not a request to try harder. "What counts as blocked" follows, either Farhelm's own
-wording or, if the user wrote their own in Settings, theirs; the stored choice is "Farhelm's" or "mine", so a
-configuration that never chose follows later changes to Farhelm's wording. `FARHELM_AGENT_INSTRUCTIONS=off` withholds it
-with the pointer. Turning **Agent is blocked** on does not affect existing sessions (whether they are waiting or not) —
-it applies only to sessions started or restarted after the setting is turned on (confirmed by the maintainer on
-2026-11-27). Running sessions keep what they started with until their next Restart, and the instruction is never stored
-with a session. One start goes without it: a GitHub checkout create that Farhelm finishes after an interruption, from
-what it recorded before. Settings shows Farhelm's wording read-only under the empty criteria field, with Reset to
-default once the user has typed their own.
+While **Ask agents to notify when blocked** is on (Settings → Notifications → Blocked agents, with or without ntfy),
+sessions started or restarted from then on also get the blocked-agent instruction after the pointer, wherever the
+pointer is delivered (Claude, Codex, Muse, Goose, Pi and OMP; the switch names them, from the same list the supervisor's
+delivery is tested against): if the agent is going to stop without finishing what the user asked because it is blocked,
+it should not stop silently but run `farhelm agent notify` first. It is not a request to try harder. "What counts as
+blocked" follows, either Farhelm's own wording or, if the user wrote their own in Settings, theirs; the stored choice is
+"Farhelm's" or "mine", so a configuration that never chose follows later changes to Farhelm's wording.
+`FARHELM_AGENT_INSTRUCTIONS=off` withholds it with the pointer. Turning **Ask agents to notify when blocked** on does
+not affect existing sessions (whether they are waiting or not) — it applies only to sessions started or restarted after
+the setting is turned on (confirmed by the maintainer on 2026-11-27). Running sessions keep what they started with until
+their next Restart, and the instruction is never stored with a session. One start goes without it: a GitHub checkout
+create that Farhelm finishes after an interruption, from what it recorded before. Settings shows Farhelm's wording
+read-only under the empty criteria field, with Reset to default once the user has typed their own.
 
 Muse's `SessionStart` hook receives that pointer as developer context; its `Stop` hook omits the announcement. The
 observed Muse 1.4.14 hooks printed nothing on the terminal on success or failure, so no vendor-output exception is
