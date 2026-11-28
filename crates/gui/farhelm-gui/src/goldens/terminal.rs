@@ -604,3 +604,194 @@ pub(super) fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyE
         .children(state.terminals.borrow().iter().cloned())
         .into_any_element()
 }
+
+// ---- The terminal tab strip's overflow controls ---------------------------------------------------------------------
+
+/// How many shell tabs the overflow scenes list: enough to overflow even the wide strip several times over.
+const OVERFLOW_TABS: usize = 12;
+
+/// The shell tab the overflow scenes choose: one in the middle, so the strip, scrolled to bring it into view, has tabs
+/// hidden past both edges, and both fades and both scroll buttons show.
+const OVERFLOW_CHOSEN: &str = "tab-5";
+
+/// Open a session listing [`OVERFLOW_TABS`] shell tabs, and once its list has drawn make `strips` terminal sets for it,
+/// each with [`OVERFLOW_CHOSEN`] chosen: one per strip the scene draws, since a strip keeps its scroll and overflow
+/// state in its set. The scene turns on the driver record, which the all-tabs scene reads to find its button.
+fn tab_overflow_setup(state: &SceneState, window: &mut Window, cx: &mut App, strips: usize) {
+    use crate::session_list::tests::session as fixture;
+
+    window.set_driver_enabled(true);
+    session_list_scene_opening(
+        state,
+        &[fixture("a").tabs(OVERFLOW_TABS), fixture("b")],
+        Some("a"),
+        cx,
+    );
+    let connection = session::connection(cx).unwrap();
+    let keep = Rc::downgrade(&state.keep);
+    connection.update(cx, |connection, _| {
+        connection.serve_terminals(move |attach| {
+            replayed_stream(None, keep.upgrade().unwrap(), |_| {})(attach)
+        });
+    });
+    state.after.set(Some(if strips == 1 {
+        make_one_overflow_set
+    } else {
+        make_two_overflow_sets
+    }));
+}
+
+/// [`make_overflow_sets`] for a scene of one strip, as a step the scene can take again.
+fn make_one_overflow_set(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    make_overflow_sets(state, 1, make_one_overflow_set, window, cx);
+}
+
+/// [`make_overflow_sets`] for a scene of two strips, as a step the scene can take again.
+fn make_two_overflow_sets(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    make_overflow_sets(state, 2, make_two_overflow_sets, window, cx);
+}
+
+/// Make `count` terminal sets for the open session, each showing [`OVERFLOW_CHOSEN`], and keep them for the scene; or,
+/// while the connection has not installed its UI session yet (the list can draw first), take this step again
+/// (`retry`) after the next frame.
+fn make_overflow_sets(
+    state: &SceneState,
+    count: usize,
+    retry: super::AfterDrawn,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let connection = session::connection(cx).unwrap();
+    let Some(session) = connection.read(cx).session().cloned() else {
+        state.after.set(Some(retry));
+        return;
+    };
+    let metrics = CellMetrics::measure(TextSize::DEFAULT, cx).unwrap();
+    for _ in 0..count {
+        let hold = Rc::new(|_: &App| Hold::Nothing);
+        let set = cx.new(|cx| TerminalSet::new(&session, "a".into(), metrics, hold, cx));
+        let mark = crate::focus::Mark::take(cx);
+        set.update(cx, |set, cx| {
+            set.choose(Some(OVERFLOW_CHOSEN.into()), &mark, window, cx)
+        });
+        assert_eq!(set.read(cx).tab_ids().len(), OVERFLOW_TABS);
+        state.keep.borrow_mut().push(Box::new(set));
+    }
+}
+
+/// The terminal sets an overflow scene made, in the order it made them.
+fn overflow_sets(state: &SceneState) -> Vec<Entity<TerminalSet>> {
+    state
+        .keep
+        .borrow()
+        .iter()
+        .filter_map(|entry| entry.downcast_ref::<Entity<TerminalSet>>().cloned())
+        .collect()
+}
+
+/// `set`'s strip in a row `width` wide on the session header's ground, as the header lays it out (a row, so the strip
+/// grows sideways into it), under its own element namespace `namespace`, so two strips of one session keep apart the
+/// element state their tabs key by tab id.
+fn overflow_strip_row(
+    set: &Entity<TerminalSet>,
+    width: f32,
+    namespace: &'static str,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let strip =
+        window.with_element_namespace(namespace, |window| TerminalSet::strip(set, window, cx));
+    div()
+        .w(px(width))
+        .flex()
+        .flex_row()
+        .flex_none()
+        .items_center()
+        .px(px(8.))
+        .py(px(4.))
+        .bg(theme::color(theme::palette(cx).bg_1))
+        .child(strip)
+        .into_any_element()
+}
+
+/// Set up [`terminal_tab_overflow`]: two strips of one session.
+pub(super) fn terminal_tab_overflow_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    tab_overflow_setup(state, window, cx, 2);
+}
+
+/// An overflowing strip with its middle tab chosen, at two widths: wide, with both edge fades, both scroll buttons
+/// enabled and the all-tabs button; and tight, where the scroll buttons give way and only the all-tabs button stays.
+pub(super) fn terminal_tab_overflow(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    defer_after(state, window, cx);
+    let column = div().flex().flex_col().gap(px(12.));
+    let sets = overflow_sets(state);
+    let [wide, tight] = sets.as_slice() else {
+        return column.into_any_element();
+    };
+    column
+        .child(overflow_strip_row(wide, 560., "wide-strip", window, cx))
+        .child(overflow_strip_row(tight, 240., "tight-strip", window, cx))
+        .into_any_element()
+}
+
+/// Set up [`terminal_tab_overflow_menu`]: one strip, and the press on its all-tabs button still to come.
+pub(super) fn terminal_tab_overflow_menu_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    tab_overflow_setup(state, window, cx, 1);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(super::Pending(std::cell::Cell::new(true))));
+}
+
+/// The wide overflowing strip with its all-tabs list open below the all-tabs button: the main terminal's row, a row per
+/// shell tab with its × beside it, and the chosen tab's row ticked. The list opens by a real press on the button, once
+/// a frame has drawn it (the controls show from the frame after the strip first finds its tabs overflowing).
+pub(super) fn terminal_tab_overflow_menu(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    use crate::terminal::set::ALL_TABS_ID;
+
+    defer_after(state, window, cx);
+    let Some(set) = overflow_sets(state).into_iter().next() else {
+        return div().into_any_element();
+    };
+    let toggle = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(ALL_TABS_ID))
+        .map(|node| node.bounds.center());
+    if let Some(at) = toggle
+        && super::take_pending(state)
+    {
+        window.defer(cx, move |window, cx| {
+            for event in crate::test_support::click_at(at) {
+                window.dispatch_event(event, cx);
+            }
+        });
+    }
+    div()
+        .flex()
+        .flex_col()
+        .child(overflow_strip_row(&set, 560., "menu-strip", window, cx))
+        .into_any_element()
+}

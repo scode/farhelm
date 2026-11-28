@@ -3084,6 +3084,75 @@ fn drawn_under(nodes: &[gpui::DriverNode], id: &str, ancestor: &str) -> bool {
     false
 }
 
+/// The terminal strip's overflow controls take width from its tabs, and beside a tunnel pill the row shares a short
+/// width between the strip and the pill in proportion to their content, so controls that only added to the strip's
+/// content would widen it and might let the tabs fit again: they would then come and go on alternate frames, or stay
+/// with nothing hidden (the overflowing-tabs plan: they must neither oscillate nor stick). The strip gives back their
+/// width while they show (`terminal::set`'s `Overflow`). Specified: for a container environment's session with four
+/// shell tabs beside a one-tunnel pill to a very long host name, at every fifth pane width from 1400 down to 710
+/// pixels, two successive draws agree on whether the controls show; where they show (in the pinned layout) the tabs,
+/// first tab's start to last tab's end, are wider than the room they would have without them (the visible part and the
+/// controls' place, less a pixel's slack), and where they do not, the tabs fit the visible part, unless that part is
+/// the narrowest pinned tier's, with no room for the all-tabs button beside a control's width of tabs; and the sweep
+/// finds both cases (the premise).
+#[test]
+fn overflow_controls_settle_beside_a_pill_at_every_width() {
+    use crate::terminal::set::{
+        AGENT_TAB_ID, MENU_ROOM, OVERFLOW_CONTROLS_ID, PINNED_TABS_FLOOR, STRIP_TABS_ID,
+        tab_element_id,
+    };
+    let mut pane = RealPane::open(
+        1400.,
+        environment_session_with_tabs(&["t1", "t2", "t3", "t4"]),
+    );
+    pane.draw();
+    pane.open_tunnel(&long_host());
+    let (first_tab, last_tab) = (tab_element_id("t1"), tab_element_id("t4"));
+    let shows = |nodes: &[gpui::DriverNode]| {
+        nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(OVERFLOW_CONTROLS_ID))
+    };
+    let (mut shown, mut hidden) = (0, 0);
+    for width in (710..=1400).rev().step_by(5) {
+        pane.resize(width as f32);
+        let before = shows(&pane.draw());
+        let nodes = pane.draw();
+        assert_eq!(
+            before,
+            shows(&nodes),
+            "the controls settle at {width} pixels"
+        );
+        if drawn_under(&nodes, AGENT_TAB_ID, STRIP_TABS_ID) {
+            continue;
+        }
+        let viewport = only_node(&nodes, STRIP_TABS_ID).bounds;
+        let tabs = only_node(&nodes, &last_tab).bounds.right()
+            - only_node(&nodes, &first_tab).bounds.left();
+        if before {
+            let controls = only_node(&nodes, OVERFLOW_CONTROLS_ID).bounds;
+            assert!(
+                tabs > controls.right() - viewport.left() - px(1.5),
+                "at {width} pixels the tabs ({tabs:?}) would not fit without the controls: visible {viewport:?}, \
+                 controls {controls:?}"
+            );
+            shown += 1;
+        } else {
+            // A strip in the narrowest pinned tier has no room for the controls, and keeps its tabs' floor instead.
+            let no_room = viewport.size.width < px(PINNED_TABS_FLOOR + MENU_ROOM + 0.5);
+            assert!(
+                tabs <= viewport.size.width + px(0.5) || no_room,
+                "at {width} pixels the tabs ({tabs:?}) fit without controls: visible {viewport:?}"
+            );
+            hidden += 1;
+        }
+    }
+    assert!(
+        shown > 0 && hidden > 0,
+        "the premise: the sweep crosses the overflow, {shown} widths with controls, {hidden} without"
+    );
+}
+
 /// SPEC.md keeps the tunnel pill fully visible down to a 650-pixel pane, and a pill counting two or more tunnels has
 /// no floor of its own (unlike one showing a mapping, which shrinks to 154 pixels by cutting the host's name): any
 /// width it gives up cuts its words. So beside such a pill the strip's floor must leave the pill its whole content

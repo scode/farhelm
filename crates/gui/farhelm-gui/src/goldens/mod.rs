@@ -819,6 +819,18 @@ static SCENES: &[Scene] = &[
         setup: terminal_cut_row_setup,
     },
     Scene {
+        name: "terminal-tab-overflow",
+        size: (600., 110.),
+        draw: terminal_tab_overflow,
+        setup: terminal_tab_overflow_setup,
+    },
+    Scene {
+        name: "terminal-tab-overflow-menu",
+        size: (600., 940.),
+        draw: terminal_tab_overflow_menu,
+        setup: terminal_tab_overflow_menu_setup,
+    },
+    Scene {
         name: "terminal-file-disclosures",
         size: (420., 260.),
         draw: terminal_file_disclosures,

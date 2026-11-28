@@ -2143,6 +2143,726 @@ fn the_strip_pins_its_ends_only_with_room_for_a_control_of_shell_tabs() {
     );
 }
 
+// ---- The overflow controls and the all-tabs list -------------------------------------------------------------------
+
+/// Session a's tab ids `t1` to `t{count}`.
+fn tab_ids(count: usize) -> Vec<String> {
+    (1..=count).map(|n| format!("t{n}")).collect()
+}
+
+impl Window<'_> {
+    /// The node drawn with element id `id` in a fresh frame, if any.
+    fn node(&mut self, id: &str) -> Option<gpui::DriverNode> {
+        test_support::frame(self.cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+    }
+
+    /// Whether the button `id`, drawn in a fresh frame, is disabled: it neither tracks a focus handle nor takes a
+    /// click, as a disabled button does (the component layer reports no disabled state of its own to the frame's
+    /// record). Panics if it is not drawn.
+    fn disabled(&mut self, id: &str) -> bool {
+        let node = self
+            .node(id)
+            .unwrap_or_else(|| panic!("{id} was not drawn"));
+        !(node.flags.focusable && node.flags.click)
+    }
+
+    /// Where Terminal 1's tab starts, in a fresh frame: how far the shell tabs are scrolled, read from what is drawn.
+    fn first_tab_left(&mut self) -> Pixels {
+        self.node(T1_TAB)
+            .expect("Terminal 1 is drawn")
+            .bounds
+            .left()
+    }
+
+    /// Choose shell tab `id` as a press on its tab would, with a fresh mark.
+    fn choose(&mut self, id: &str) {
+        let set = self.set();
+        let id = id.to_owned();
+        self.cx.update(|w, cx| {
+            let mark = Mark::take(cx);
+            set.update(cx, |set, cx| set.choose(Some(id), &mark, w, cx));
+        });
+        settle(self.cx);
+    }
+}
+
+/// The plan's acceptance criterion: the overflow controls appear only when the shell tabs actually overflow, and go
+/// again once they fit, rather than sticking because the controls themselves took the room the tabs needed. Specified:
+/// with three tabs (the premise: Terminal 3 drawn whole) no overflow control is drawn; listing twenty (the premise:
+/// Terminal 20 not drawn whole) draws the scroll buttons and the all-tabs button, each whole, between the last visible
+/// tab and New terminal, the back button disabled at the strip's start and the forward one enabled; listing three
+/// again draws none.
+#[gpui::test]
+fn overflow_controls_show_only_while_the_shell_tabs_overflow(cx: &mut TestAppContext) {
+    use super::{ADD_ID, ALL_TABS_ID, OVERFLOW_CONTROLS_ID, SCROLL_BACK_ID, SCROLL_FORWARD_ID};
+    let mut window = open(cx, snapshot(&["t1", "t2", "t3"]));
+    assert!(window.drawn_whole(T3_TAB), "the premise: three tabs fit");
+    assert!(
+        window.node(OVERFLOW_CONTROLS_ID).is_none(),
+        "no overflow controls while the tabs fit"
+    );
+
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    window.push_tabs(&refs);
+    assert!(
+        !window.drawn_whole(&tab_element_id("t20")),
+        "the premise: twenty tabs overflow"
+    );
+    for id in [SCROLL_BACK_ID, SCROLL_FORWARD_ID, ALL_TABS_ID] {
+        assert!(window.drawn_whole(id), "{id} is drawn whole");
+    }
+    let controls = test_support::bounds(window.cx, OVERFLOW_CONTROLS_ID);
+    let add = test_support::bounds(window.cx, ADD_ID);
+    let tabs = test_support::bounds(window.cx, super::STRIP_TABS_ID);
+    assert!(
+        controls.left() >= tabs.right() && controls.right() <= add.left(),
+        "the controls sit between the tabs and New terminal: tabs {tabs:?}, controls {controls:?}, New {add:?}"
+    );
+    assert!(window.disabled(SCROLL_BACK_ID), "nothing before the start");
+    assert!(!window.disabled(SCROLL_FORWARD_ID), "tabs after the end");
+
+    window.push_tabs(&["t1", "t2", "t3"]);
+    assert!(
+        window.node(OVERFLOW_CONTROLS_ID).is_none(),
+        "the controls go once the tabs fit again"
+    );
+}
+
+/// The scroll buttons are the pointer's way through an overflowing strip without a wheel; they must move it a useful
+/// step, stop at each end with the button that has nothing left to do disabled, and leave the choice and its reveal
+/// alone (the plan: manual scrolling is never fought). Specified: with twenty tabs and the main terminal shown, a press
+/// on forward moves Terminal 1 left by most of the scrolling part's width (between 70 and 90 percent of it) and a
+/// further frame leaves it there; pressing forward until it is disabled (at most 40 presses) brings Terminal 20 in
+/// whole with back enabled; pressing back until it is disabled brings Terminal 1 in whole with forward enabled; and
+/// the main terminal is still the one shown.
+#[gpui::test]
+fn the_scroll_buttons_step_the_tabs_and_stop_at_each_end(cx: &mut TestAppContext) {
+    use super::{SCROLL_BACK_ID, SCROLL_FORWARD_ID, STRIP_TABS_ID};
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let viewport = test_support::bounds(window.cx, STRIP_TABS_ID).size.width;
+    let start = window.first_tab_left();
+
+    click(window.cx, SCROLL_FORWARD_ID);
+    let moved = start - window.first_tab_left();
+    assert!(
+        moved > viewport * 0.7 && moved < viewport * 0.9,
+        "one step is most of the visible width: moved {moved:?} of {viewport:?}"
+    );
+    let stepped = window.first_tab_left();
+    test_support::redraw(window.cx);
+    assert_eq!(
+        window.first_tab_left(),
+        stepped,
+        "nothing pulls the step back"
+    );
+
+    for _ in 0..40 {
+        if window.disabled(SCROLL_FORWARD_ID) {
+            break;
+        }
+        click(window.cx, SCROLL_FORWARD_ID);
+    }
+    assert!(
+        window.disabled(SCROLL_FORWARD_ID),
+        "forward stops at the end"
+    );
+    assert!(
+        window.drawn_whole(&tab_element_id("t20")),
+        "the last tab is in view"
+    );
+    assert!(!window.disabled(SCROLL_BACK_ID), "back has tabs to show");
+
+    for _ in 0..40 {
+        if window.disabled(SCROLL_BACK_ID) {
+            break;
+        }
+        click(window.cx, SCROLL_BACK_ID);
+    }
+    assert!(window.disabled(SCROLL_BACK_ID), "back stops at the start");
+    assert!(window.drawn_whole(T1_TAB), "the first tab is in view");
+    assert!(
+        !window.disabled(SCROLL_FORWARD_ID),
+        "forward has tabs to show"
+    );
+    assert_eq!(window.chosen(), None, "scrolling chose nothing");
+}
+
+/// A scroll button's state is drawn before the frame lays the strip out, and a reveal of the chosen tab moves the strip
+/// only during that layout; without a second look the forward button would stay enabled at the very end it was scrolled
+/// to, and a press would do nothing. Specified: with twenty tabs (the premise: forward enabled), choosing Terminal 20
+/// scrolls it into view (the premise) and, in the frames the choice settles in, disables forward and enables back.
+#[gpui::test]
+fn the_scroll_buttons_follow_a_reveal_in_the_same_frame(cx: &mut TestAppContext) {
+    use super::{SCROLL_BACK_ID, SCROLL_FORWARD_ID};
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    assert!(
+        !window.disabled(SCROLL_FORWARD_ID),
+        "the premise: forward starts enabled"
+    );
+    window.choose("t20");
+    assert!(
+        window.drawn_whole(&tab_element_id("t20")),
+        "the premise: the choice was revealed"
+    );
+    assert!(window.disabled(SCROLL_FORWARD_ID), "forward is at its end");
+    assert!(!window.disabled(SCROLL_BACK_ID), "back is not");
+}
+
+/// The all-tabs list is the one control that reaches any tab in a press however far the strip is scrolled (the plan's
+/// decision), so it must list every tab, say which is shown, start where the user is, and show what they pick. The
+/// shown one is reported pressed, as the strip's tabs are: the rows are buttons in a group (a menu could not hold their
+/// ×s), and a button's selected state is one assistive technology does not announce. Specified: with twenty tabs and
+/// Terminal 5 chosen, a press on the all-tabs button opens a list holding the main terminal's row and one row per shell
+/// tab, each a button, only Terminal 5's reported pressed and none reported selected; exactly one × per shell tab, each
+/// beside its own row, so none beside the main terminal's; focus on Terminal 5's row; a press on Terminal 17's row
+/// closes the list, shows Terminal 17, whose tab is drawn whole, and focuses the terminal.
+#[gpui::test]
+fn the_all_tabs_list_lists_every_tab_and_shows_the_one_chosen(cx: &mut TestAppContext) {
+    use super::{
+        ALL_TABS_AGENT_ID, ALL_TABS_ID, ALL_TABS_MENU_ID, all_tabs_close_id, all_tabs_row_id,
+    };
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    window.choose("t5");
+
+    click(window.cx, ALL_TABS_ID);
+    let nodes = test_support::frame(window.cx);
+    let in_list = |node: &&gpui::DriverNode| {
+        node.element_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("session-terminal-all-tabs-"))
+    };
+    let pressed: Vec<String> = nodes
+        .iter()
+        .filter(in_list)
+        .filter(|node| node.toggled == Some(gpui::Toggled::True))
+        .filter_map(|node| node.element_id.as_ref().map(ToString::to_string))
+        .collect();
+    assert_eq!(
+        pressed,
+        [all_tabs_row_id("t5")],
+        "only the shown tab is ticked"
+    );
+    assert!(
+        !nodes
+            .iter()
+            .filter(in_list)
+            .any(|node| node.selected.is_some()),
+        "no row reports a selected state, which a button does not announce"
+    );
+    let row_roles: Vec<_> = std::iter::once(ALL_TABS_AGENT_ID.to_owned())
+        .chain(ids.iter().map(|id| all_tabs_row_id(id)))
+        .map(|row| {
+            nodes
+                .iter()
+                .find(|node| node.element_id.as_deref() == Some(row.as_str()))
+                .and_then(|node| node.role)
+        })
+        .collect();
+    assert!(
+        row_roles
+            .iter()
+            .all(|role| *role == Some(gpui::Role::Button)),
+        "every row is a button: {row_roles:?}"
+    );
+    let drawn = |id: &str| {
+        nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(id))
+    };
+    assert!(drawn(ALL_TABS_MENU_ID), "the list opened");
+    assert!(drawn(ALL_TABS_AGENT_ID), "the main terminal's row");
+    for id in &ids {
+        assert!(drawn(&all_tabs_row_id(id)), "{id}'s row");
+        assert!(drawn(&all_tabs_close_id(id)), "{id}'s ×");
+    }
+    let closes = nodes
+        .iter()
+        .filter(|node| {
+            node.element_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("session-terminal-all-tabs-close-"))
+        })
+        .count();
+    assert_eq!(
+        closes,
+        ids.len(),
+        "one × per shell tab, so none for the main terminal's row"
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx),
+        Some(all_tabs_row_id("t5")),
+        "focus starts on the shown tab's row"
+    );
+
+    click(window.cx, "session-terminal-all-tabs-tab-t17");
+    assert!(
+        !test_support::drawn(window.cx, ALL_TABS_MENU_ID),
+        "choosing closes the list"
+    );
+    assert_eq!(window.chosen().as_deref(), Some("t17"));
+    assert!(
+        window.drawn_whole(&tab_element_id("t17")),
+        "the chosen tab was scrolled into view"
+    );
+    assert!(
+        test_support::terminal_focused(window.cx),
+        "its terminal has focus"
+    );
+}
+
+/// The list is a menu its button opens, so Escape must close it and give focus back to the button, as SPEC.md has every
+/// menu do, or a keyboard user would land somewhere else in the window. Specified: with twenty tabs and the main
+/// terminal shown, the all-tabs button's list open with focus on its main terminal's row (the premise: Escape starts
+/// inside the list), Escape closes it with focus on the all-tabs button.
+#[gpui::test]
+fn escape_closes_the_all_tabs_list_with_focus_back_on_its_button(cx: &mut TestAppContext) {
+    use super::{ALL_TABS_ID, ALL_TABS_MENU_ID};
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let window = open(cx, snapshot(&refs));
+    click(window.cx, ALL_TABS_ID);
+    assert!(
+        test_support::drawn(window.cx, ALL_TABS_MENU_ID),
+        "the premise: open"
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some(super::ALL_TABS_AGENT_ID),
+        "the premise: focus is in the list, on the shown tab's row"
+    );
+    keys(window.cx, "escape");
+    test_support::redraw(window.cx);
+    assert!(!test_support::drawn(window.cx, ALL_TABS_MENU_ID), "closed");
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some(ALL_TABS_ID)
+    );
+}
+
+/// A × in the all-tabs list closes a tab that may be scrolled far out of the strip, from a list that must go before the
+/// question opens; a question hung from the list's row would hang from nothing, and one hung from the tab's own × from
+/// a place off screen (the plan's acceptance criterion). Specified: with twenty tabs, the list open, a press on
+/// Terminal 3's × closes the list and opens one question, "Close Terminal 3?", below the all-tabs button and across
+/// it, with nothing sent; confirming sends exactly one DELETE, for t3.
+#[gpui::test]
+fn closing_from_the_all_tabs_list_asks_under_the_all_tabs_button(cx: &mut TestAppContext) {
+    use super::{ALL_TABS_ID, ALL_TABS_MENU_ID};
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    tab_requests(&mut window.helm);
+    click(window.cx, ALL_TABS_ID);
+    click(window.cx, "session-terminal-all-tabs-close-t3");
+    assert!(
+        !test_support::drawn(window.cx, ALL_TABS_MENU_ID),
+        "the list closed first"
+    );
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 3?".to_owned()), 1)
+    );
+    let toggle = test_support::bounds(window.cx, ALL_TABS_ID);
+    let question = test_support::bounds(window.cx, "prompt");
+    assert!(
+        question.top() >= toggle.bottom()
+            && question.left() <= toggle.right()
+            && question.right() >= toggle.left(),
+        "the question hangs under the all-tabs button: button {toggle:?}, question {question:?}"
+    );
+    assert_eq!(
+        deleted(&mut window.helm),
+        [] as [String; 0],
+        "nothing sent yet"
+    );
+
+    click(window.cx, "prompt-confirm");
+    assert_eq!(deleted(&mut window.helm), ["t3"]);
+}
+
+/// With Skip session confirmations on, the list's × closes the tab at once, as the strip's × does (SPEC.md: the switch
+/// skips "terminal-tab Close"). Specified: with twenty tabs and the switch on, the list's × for Terminal 3 closes the
+/// list, asks nothing and sends exactly one DELETE, for t3.
+#[gpui::test]
+fn closing_from_the_all_tabs_list_skips_the_question_when_confirmations_are_skipped(
+    cx: &mut TestAppContext,
+) {
+    use super::{ALL_TABS_ID, ALL_TABS_MENU_ID};
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, skipping(&refs));
+    tab_requests(&mut window.helm);
+    click(window.cx, ALL_TABS_ID);
+    click(window.cx, "session-terminal-all-tabs-close-t3");
+    assert!(!test_support::drawn(window.cx, ALL_TABS_MENU_ID), "closed");
+    assert_eq!(window.questions(), (None, 0), "nothing asked");
+    assert_eq!(deleted(&mut window.helm), ["t3"]);
+}
+
+/// The width tiers decide which overflow controls a pinned strip keeps, and the scroll buttons go first so the
+/// all-tabs button, which reaches any tab, stays (the plan's acceptance criterion); the all-tabs button in turn never
+/// takes the control's width of shell tabs the pinned layout keeps for a focused tab ([`super::PINNED_TABS_FLOOR`]).
+/// Specified, for a main tab 50 pixels wide: a strip not laid out yet gets every control; a strip exactly as wide as
+/// the main tab, the gap, a tab's width of shell tabs, both scroll buttons, the all-tabs button and New terminal gets
+/// every control, and one a pixel narrower only the all-tabs button; a strip exactly as wide as the main tab, the gap,
+/// a control's width of shell tabs, the all-tabs button and New terminal keeps the all-tabs button, and one a pixel
+/// narrower none.
+#[test]
+fn a_tight_strip_drops_the_scroll_buttons_before_the_all_tabs_button() {
+    use super::OverflowTier::{self, ArrowsAndMenu, Menu, NoRoom};
+    let agent = gpui::px(50.);
+    let beside = |tabs: f32, controls: f32| {
+        50. + super::STRIP_GAP + tabs + controls + super::PINNED_ADD_WIDTH
+    };
+    let full = beside(
+        super::ARROWS_TABS_FLOOR,
+        super::ARROWS_ROOM + super::MENU_ROOM,
+    );
+    let menu = beside(super::PINNED_TABS_FLOOR, super::MENU_ROOM);
+    assert_eq!((full, menu), (271., 143.), "the premise: the widths named");
+    assert_eq!(OverflowTier::at(gpui::px(0.), agent), ArrowsAndMenu);
+    assert_eq!(OverflowTier::at(gpui::px(full), agent), ArrowsAndMenu);
+    assert_eq!(OverflowTier::at(gpui::px(full - 1.), agent), Menu);
+    assert_eq!(OverflowTier::at(gpui::px(menu), agent), Menu);
+    assert_eq!(OverflowTier::at(gpui::px(menu - 1.), agent), NoRoom);
+}
+
+impl Window<'_> {
+    /// The largest number of shell tabs, `t1` onwards, that session a's strip shows without the overflow controls, found
+    /// by listing one more at a time (up to 40) until the controls appear; the strip is left listing that many. For a
+    /// test that needs a strip on the very edge of overflowing, whatever the test text system makes a tab's width.
+    fn most_tabs_that_fit(&mut self) -> usize {
+        for count in 1..=40 {
+            let ids = tab_ids(count);
+            let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            self.push_tabs(&refs);
+            if self.node(super::OVERFLOW_CONTROLS_ID).is_some() {
+                let fit = tab_ids(count - 1);
+                let refs: Vec<&str> = fit.iter().map(String::as_str).collect();
+                self.push_tabs(&refs);
+                assert!(
+                    self.node(super::OVERFLOW_CONTROLS_ID).is_none(),
+                    "the premise: {} tabs fit again",
+                    count - 1
+                );
+                return count - 1;
+            }
+        }
+        panic!("forty tabs never overflowed the strip");
+    }
+}
+
+/// GPUI places a reveal against the viewport the frame before left, and the frame that first draws the overflow
+/// controls narrows that viewport by their width. A tab New terminal opens in a strip it makes overflow is revealed in
+/// the frame that first lays it out, flush with the wide viewport's right edge, and the next frame's controls would
+/// then cover it, unless the frame that decides to show them asks for the reveal again (`TerminalSet::strip`'s layout
+/// check: that frame moves nothing, so only the request it carries into the next lets that frame see the viewport
+/// move). This is the review finding that the controls could leave a chosen tab clipped on the frame they appear.
+/// Specified: with as many tabs as fit without the controls (the premise: none drawn), New terminal answered with one
+/// more tab and the row then listing it, that tab is chosen, the controls are drawn (the premise: the strip now
+/// overflows), and the new tab is drawn whole.
+#[gpui::test]
+fn a_tab_that_makes_the_strip_overflow_stays_whole_beside_the_controls(cx: &mut TestAppContext) {
+    use super::{ADD_ID, OVERFLOW_CONTROLS_ID};
+    let mut window = open(cx, snapshot(&["t1"]));
+    let fit = window.most_tabs_that_fit();
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    tab_requests(&mut window.helm);
+
+    click(window.cx, ADD_ID);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "the premise: one open request");
+    let new = format!("t{}", fit + 1);
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": new } })));
+    settle(window.cx);
+    let ids = tab_ids(fit + 1);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    window.push_tabs(&refs);
+    assert_eq!(window.chosen().as_deref(), Some(new.as_str()));
+    assert!(
+        window.node(OVERFLOW_CONTROLS_ID).is_some(),
+        "the premise: the new tab made the strip overflow"
+    );
+    assert!(
+        window.drawn_whole(&tab_element_id(&new)),
+        "the new tab is whole beside the controls"
+    );
+}
+
+/// The review's concrete path for the same clipping: reopening a session whose remembered tab ends in the part of the
+/// strip the overflow controls take once they show. The new strip's first frames reveal that tab against a viewport
+/// without the controls, where it is already in view, so nothing scrolls, and the controls then cover it; the reveal
+/// must be asked again in the frame after the one that moved the viewport, against the narrower one. Specified: with
+/// twenty tabs and the main terminal shown, some tab, Terminal k, lies wholly inside the strip as it would be without
+/// the controls but ends under them (the premise, read from the drawn frame: its left edge inside the scrolling part,
+/// its right edge past the part's end and no further than the controls' end); with Terminal k chosen, leaving for
+/// session b and coming back restores it (the premise), the controls are drawn, and Terminal k is drawn whole.
+#[gpui::test]
+fn a_restored_tab_under_the_overflow_controls_is_scrolled_into_view(cx: &mut TestAppContext) {
+    use super::{OVERFLOW_CONTROLS_ID, STRIP_TABS_ID};
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let nodes = test_support::frame(window.cx);
+    let bounds_of = |id: &str| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .map(|node| node.bounds)
+            .unwrap_or_else(|| panic!("{id} was drawn"))
+    };
+    let viewport = bounds_of(STRIP_TABS_ID);
+    let controls = bounds_of(OVERFLOW_CONTROLS_ID);
+    let under = ids
+        .iter()
+        .find(|id| {
+            let tab = bounds_of(&tab_element_id(id));
+            tab.left() >= viewport.left()
+                && tab.right() > viewport.right()
+                && tab.right() <= controls.right()
+        })
+        .expect("the premise: some tab ends where the controls are drawn")
+        .clone();
+    window.choose(&under);
+    assert_eq!(
+        window.remembered().as_deref(),
+        Some(under.as_str()),
+        "the premise: remembered"
+    );
+
+    click(window.cx, "session-row-b");
+    click(window.cx, "session-row-a");
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some(under.as_str()),
+        "the premise: restored"
+    );
+    assert!(
+        window.node(OVERFLOW_CONTROLS_ID).is_some(),
+        "the premise: the controls show"
+    );
+    assert!(
+        window.drawn_whole(&tab_element_id(&under)),
+        "the restored tab was scrolled out from under the controls"
+    );
+}
+
+/// A disabled button takes no focus, so a keyboard user stepping a scroll button to its end would lose focus to the
+/// focus coordinator's recovery, which on the page goes to the session's terminal: their next Space or Enter, still
+/// meant for the button, would reach the shell, where Enter runs the command line. The step hands focus to the other
+/// scroll button instead, which the step has just enabled. Specified: with twenty tabs, keyboard focus on the forward
+/// button (the premise), Space pressed until forward is disabled (at most 40 presses) leaves focus on the back button
+/// and not in the terminal; Space then pressed until back is disabled leaves focus on the forward button.
+#[gpui::test]
+fn a_scroll_button_reaching_its_end_hands_focus_to_the_other(cx: &mut TestAppContext) {
+    use super::{SCROLL_BACK_ID, SCROLL_FORWARD_ID};
+    let ids = tab_ids(20);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let set = window.set();
+    let [back, forward] = window.cx.update(|_, cx| set.read(cx).scroll_focus.clone());
+    window.focus(&forward);
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some(SCROLL_FORWARD_ID),
+        "the premise: forward holds focus"
+    );
+
+    for _ in 0..40 {
+        if window.disabled(SCROLL_FORWARD_ID) {
+            break;
+        }
+        keys(window.cx, "space");
+    }
+    assert!(
+        window.disabled(SCROLL_FORWARD_ID),
+        "the premise: forward reached its end"
+    );
+    assert!(
+        test_support::focused(window.cx, &back),
+        "focus moved to back"
+    );
+    assert!(
+        !test_support::terminal_focused(window.cx),
+        "focus did not fall into the terminal"
+    );
+
+    for _ in 0..40 {
+        if window.disabled(SCROLL_BACK_ID) {
+            break;
+        }
+        keys(window.cx, "space");
+    }
+    assert!(
+        window.disabled(SCROLL_BACK_ID),
+        "the premise: back reached its end"
+    );
+    assert!(
+        test_support::focused(window.cx, &forward),
+        "focus moved back to forward"
+    );
+}
+
+/// A close question needs somewhere to hang: asked against an anchor that is no longer drawn, it opens in the middle
+/// of the window rather than not at all, which is what the plan's criterion asks of a close from the all-tabs list
+/// whose button has gone ("or centered fallback"); before this, an undrawn anchor opened nothing. Specified: with three
+/// tabs, Terminal 3's × anchor as the strip drew it, then the row listing only t1 and t2 so that × is gone (the
+/// premise: the anchor reports no bounds), asking to close Terminal 2 against that anchor opens one question, "Close
+/// Terminal 2?", centered across the window to within a pixel, with nothing sent; confirming sends exactly one DELETE,
+/// for t2.
+#[gpui::test]
+fn a_close_question_without_its_anchor_opens_in_the_middle_of_the_window(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2", "t3"]));
+    let set = window.set();
+    let gone = window.cx.update(|_, cx| {
+        set.read(cx)
+            .close_anchors
+            .borrow()
+            .get("t3")
+            .cloned()
+            .expect("the premise: Terminal 3's × was drawn")
+    });
+    window.push_tabs(&["t1", "t2"]);
+    test_support::redraw(window.cx);
+    assert!(
+        gone.drawn_bounds().is_none(),
+        "the premise: the anchor is gone"
+    );
+    tab_requests(&mut window.helm);
+
+    window.cx.update(|w, cx| {
+        super::ask_to_close(&set, "t2", "Terminal 2", &gone, w, cx);
+    });
+    settle(window.cx);
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 2?".to_owned()), 1)
+    );
+    let question = test_support::bounds(window.cx, "prompt");
+    let width = window.cx.update(|w, _| w.viewport_size().width);
+    assert!(
+        (question.center().x - width / 2.).abs() <= gpui::px(1.),
+        "the question is centered: {question:?} in a window {width:?} wide"
+    );
+    assert_eq!(
+        deleted(&mut window.helm),
+        [] as [String; 0],
+        "nothing sent yet"
+    );
+    click(window.cx, "prompt-confirm");
+    assert_eq!(deleted(&mut window.helm), ["t2"]);
+}
+
+/// Keyboard focus reaches a × or a tab scrolled only just into view, against the strip's edge, where an edge fade
+/// starts fully opaque; Shift+Tab back through an overflowing strip would land on controls half painted over, focus
+/// ring and all. So a fade yields to the control focus is on, and only that one. Specified, for a scrolling part 400
+/// pixels wide from x = 100, scrolled away from both ends: with nothing focused, both fades are painted, each 16 pixels
+/// wide along its edge; with a 20-pixel × focused 3 pixels in from the left edge, the left fade is left out and the
+/// right one kept; with it focused 30 pixels in (its ring clear of the fade), both are kept; with a control focused
+/// against the right edge, only the left fade is kept; and at the start, the left fade is never painted, focus or not.
+#[test]
+fn an_edge_fade_leaves_out_only_the_control_focus_is_on() {
+    use super::fade_edges;
+    let viewport = test_support::rect(100., 0., 400., 24.);
+    let close_at = |x: f32| Some(test_support::rect(x, 2., 20., 20.));
+    let (left, right) = fade_edges(viewport, (false, false), None);
+    assert_eq!(
+        (left, right),
+        (
+            Some(test_support::rect(100., 0., 16., 24.)),
+            Some(test_support::rect(484., 0., 16., 24.))
+        ),
+        "both edges fade with nothing focused"
+    );
+    assert_eq!(
+        fade_edges(viewport, (false, false), close_at(103.)),
+        (None, right),
+        "a × against the left edge clears the left fade only"
+    );
+    assert_eq!(
+        fade_edges(viewport, (false, false), close_at(130.)),
+        (left, right),
+        "a × clear of the fade, ring and all, leaves both"
+    );
+    assert_eq!(
+        fade_edges(viewport, (false, false), close_at(477.)),
+        (left, None),
+        "a control against the right edge clears the right fade only"
+    );
+    assert_eq!(
+        fade_edges(viewport, (true, false), close_at(300.)),
+        (None, right),
+        "nothing is scrolled out past the start"
+    );
+}
+
+/// The overflow tier is chosen from the last frame's widths, so the frame that first sees a pinned strip widen out of
+/// the tier with no room for the controls still draws without them, and changes no layout either: unless that frame
+/// asks for another itself, the controls stay missing until something unrelated redraws the window (a cursor blink, a
+/// pointer move). Only `settle` runs here, which draws whatever the strip asked for and nothing more, unlike the
+/// step helpers that force fresh frames and would hide a missing request. Specified: with eight tabs in a window 980
+/// pixels wide, the strip is pinned and too tight for the controls (the premise: pinned, no room, none drawn); once the
+/// window is 1000 pixels wide and the app has settled, without a frame forced, the strip has room for the all-tabs
+/// button (the premise) and the last frame drew the controls.
+#[gpui::test]
+fn a_strip_widening_into_room_for_the_controls_shows_them_unprompted(cx: &mut TestAppContext) {
+    use super::{OVERFLOW_CONTROLS_ID, OverflowTier, StripLayout};
+    let ids = tab_ids(8);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let set = window.set();
+    let tier = |window: &mut Window| {
+        window.cx.update(|_, cx| {
+            let set = set.read(cx);
+            (
+                set.layout(),
+                OverflowTier::at(
+                    set.strip_bounds.bounds().size.width,
+                    set.agent_bounds.bounds().size.width,
+                ),
+            )
+        })
+    };
+    window
+        .cx
+        .simulate_resize(gpui::size(gpui::px(980.), gpui::px(700.)));
+    settle(window.cx);
+    assert_eq!(
+        tier(&mut window),
+        (StripLayout::Pinned, OverflowTier::NoRoom),
+        "the premise: a pinned strip without room for the controls"
+    );
+    assert!(
+        !test_support::drawn(window.cx, OVERFLOW_CONTROLS_ID),
+        "the premise: no controls drawn"
+    );
+
+    window
+        .cx
+        .simulate_resize(gpui::size(gpui::px(1000.), gpui::px(700.)));
+    settle(window.cx);
+    assert_eq!(
+        tier(&mut window),
+        (StripLayout::Pinned, OverflowTier::Menu),
+        "the premise: the strip now has room for the all-tabs button"
+    );
+    assert!(
+        test_support::drawn(window.cx, OVERFLOW_CONTROLS_ID),
+        "the strip asked for the frames that show the controls"
+    );
+}
+
 /// Tunnels belong to the session (SPEC.md: the top row's pill lists the session's tunnels), so a tunnel a tab opens
 /// must show in the pill, which reads the agent terminal's list, and a remote session's tabs must not each read the
 /// list again. Specified: every tab's terminal uses the agent terminal's tunnel list.

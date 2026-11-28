@@ -2556,9 +2556,20 @@ spot opens another tab rather than reaching the new tab's close button; only the
 strip too narrow to show the main tab, New terminal and a control's width of shell tabs (a 650px pane beside a tunnel
 pill, say) puts the main tab before the first shell tab and New terminal after the last instead, scrolling with them, so
 that every tab stays reachable. However a tab becomes the shown one (a press, a shortcut, New terminal, the fallback
-after a close, or the remembered tab restored), the strip scrolls it into view, once: scrolling the strip afterwards is
-not undone, unless the strip's width changes which of its tabs stay put (a tunnel pill appearing beside it, say), when
-it scrolls the shown tab into view again.
+after a close, the remembered tab restored, or a choice in the all-tabs list), the strip scrolls it into view, once:
+scrolling the strip afterwards is not undone, unless the strip's width changes which of its tabs stay put (a tunnel pill
+appearing beside it, say), when it scrolls the shown tab into view again.
+
+While the shell tabs do not all fit, the strip fades each edge past which tabs are scrolled out of view and shows,
+between the shell tabs and New terminal, a back and a forward button that scroll the shell tabs by most of their visible
+width, each disabled at its end (a press that brings one to its end while it has keyboard focus moves focus to the
+other), and an all-tabs button whose name and tooltip give the number of shell tabs. It opens a list of every tab, the
+main terminal first, with the shown one ticked. Choosing a row shows that tab. Each shell tab's row has its own close
+button, which closes the list and then closes the tab as the tab's close button does, asking under the all-tabs button
+(or in the middle of the window if that button is gone) unless session confirmations are skipped. A strip too tight for
+all three drops the scroll buttons and keeps the all-tabs button, and one too tight for that beside a control's width of
+shell tabs shows only the fades, as does a strip using the narrow fallback above. The controls show only while the tabs
+overflow and go as soon as the tabs fit without them.
 
 Closing the active shell tab, including when its shell exits or another client closes it, selects the nearest surviving
 tab to its left in opening order. The main terminal takes over when there is no earlier tab. Closing a tab that is

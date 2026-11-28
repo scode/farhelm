@@ -68,11 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Overflowing terminal tabs go invisible.** When there are more terminal tabs than fit visually, they just go
-  invisible beneath the buttons to the right. You can still create new terminals, you can still switch between them
-  using the keyboard, but they're just awkwardly invisible, and you can't see the current terminal that's selected, and
-  we need to fix that. Plan: `plans/queue/terminal-tab-overflow-ux.md`.
-
 - **Blocked notify should also go red-active and ring the bell.** When an agent reported being blocked with
   `farhelm agent notify`, it generated the ntfy notifications, but did NOT generate a "red active" and bell like when
   the question tool is used. It should have generated both. Fix that, and overall talk about related tweaks during

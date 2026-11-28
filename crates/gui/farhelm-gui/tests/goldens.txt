@@ -360,8 +360,8 @@ linux/session-status-segments--dark.png 0aeb8c7ab680f49604fde27b933d90227cc17594
 linux/session-status-segments--light.png 89c7374a57a5010ff3c886455dbad9ea114d73a8
 linux/session-summary-card--dark.png 1bcf3315eb88476c4e437da8206608cccdee16ea
 linux/session-summary-card--light.png 0af125cd4857c81edca0d1b682c17f774be7ae65
-linux/session-toolbar--dark.png 7c072e4329d7ebacf63c1e157714ca61e0884bfc
-linux/session-toolbar--light.png bacf21d323159f7478b10a1a075ec7661a754c7d
+linux/session-toolbar--dark.png b4dea80ed45a5ee1bdac6eaea69eb0fa6c5e8b6c
+linux/session-toolbar--light.png d288510a3ff62291613526039264dc05a16407eb
 linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
 linux/settings-antigravity--dark.png 429672ff29396cfdafe153523744c7fa04c9c31b
@@ -536,6 +536,10 @@ linux/terminal-status--dark.png 53fabe736381d77ba1387de228c460d1f39d90e8
 linux/terminal-status--light.png fb8e37d22307b0f7eada3b329c08b0bd7987b41e
 linux/terminal-styles--dark.png 1cba223f1d0cba90a1a75f647db4777e2039149d
 linux/terminal-styles--light.png 1c1142a213eda81a9955b53a6c58ce0a2f42bd6e
+linux/terminal-tab-overflow--dark.png f08846951db38f44deabc811a33766fba2ad0653
+linux/terminal-tab-overflow--light.png 6a8e7f2149d3ecbc4770ad875d86e355f13c5325
+linux/terminal-tab-overflow-menu--dark.png 87486883aa3d5b5be80f1d01bb62f4bf2145d073
+linux/terminal-tab-overflow-menu--light.png 73712fd9b30242eeb435f687a2a8cd87bd19890d
 linux/terminal-wide-glyphs--dark.png a30fc0c7506d76c90a999d0493fb590368d0c3db
 linux/terminal-wide-glyphs--light.png b5b1858cface1b962827ea28daea6776e4a9fbb2
 linux/text-input--dark.png c8c86c81c6e9c4ca9d1727a731a9ba9d57408cd4
