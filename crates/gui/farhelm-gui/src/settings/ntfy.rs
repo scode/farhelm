@@ -193,6 +193,8 @@ impl Form {
             // into a stored one, and later changes to the ntfy switches no longer move it.
             ask_agents_when_blocked: Some(self.ask_agents),
             grace_period_secs: Some(self.grace_period_secs),
+            // This form has no quiet hours controls yet, so it keeps the stored ones.
+            quiet_hours: None,
         }
     }
 

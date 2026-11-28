@@ -10308,6 +10308,7 @@ mod tests {
             custom_blocked_criteria: None,
             ask_agents_when_blocked: None,
             grace_period_secs: None,
+            quiet_hours: None,
             enabled: true,
             server_url: "https://ntfy.example".into(),
             topic: "deadline-tests".into(),

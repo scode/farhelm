@@ -82,6 +82,87 @@ pub struct Settings {
     /// read as [`DEFAULT_GRACE_PERIOD_SECS`]; at most [`MAX_GRACE_PERIOD_SECS`].
     #[serde(default = "grace_period_default")]
     pub grace_period_secs: u32,
+    /// A daily range of local hours during which alerts go out at another priority, or not at all. Configurations
+    /// saved before it existed read as [`QuietHours::default`], which is off.
+    #[serde(default)]
+    pub quiet_hours: QuietHours,
+}
+
+/// Quiet hours for ntfy alerts: from `start_hour` up to, not including, `end_hour`, in the local time of the machine
+/// the helm runs on, every alert the helm sends goes out at `priority` instead of the saved one, or is not sent at all
+/// when `priority` is `None` (shown as Off).
+///
+/// The range is half-open and may wrap past midnight: 22 to 7 covers 22:00 through 06:59, and 9 to 17 covers 09:00
+/// through 16:59. Hours are whole hours (0 to 23), and the start and end must differ, which the helm checks on every
+/// save; a range that breaks either rule is never active ([`Self::contains_hour`]), so a malformed stored value can
+/// silence nothing.
+///
+/// Send test does not follow these rules: it always sends, so a user can check the connection during quiet hours that
+/// silence alerts ([`Settings::test_outcome`]).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct QuietHours {
+    pub enabled: bool,
+    pub start_hour: u8,
+    pub end_hour: u8,
+    /// The priority alerts go out at during quiet hours; `None` (JSON `null`) sends none. An absent field reads as
+    /// [`Priority::Low`], the default, so that only an explicit `null` silences alerts.
+    #[serde(default = "quiet_priority_default")]
+    pub priority: Option<Priority>,
+}
+
+impl Default for QuietHours {
+    /// Off, with the range and priority the form starts from when the user turns it on: 22:00 to 07:00 at Low.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            start_hour: 22,
+            end_hour: 7,
+            priority: quiet_priority_default(),
+        }
+    }
+}
+
+/// What an absent quiet-hours priority means: Low.
+fn quiet_priority_default() -> Option<Priority> {
+    Some(Priority::Low)
+}
+
+impl QuietHours {
+    /// Whether quiet hours are on and `hour` (0 to 23, local time) falls in their range. A range whose hours are out of
+    /// bounds or equal is never active.
+    pub fn contains_hour(&self, hour: u8) -> bool {
+        let (start, end) = (self.start_hour, self.end_hour);
+        if !self.enabled || start > 23 || end > 23 || start == end {
+            return false;
+        }
+        if start < end {
+            hour >= start && hour < end
+        } else {
+            hour >= start || hour < end
+        }
+    }
+}
+
+/// What a Send test did, so the form can say what priority the test arrived at and why (`POST /api/ntfy-alerts/test`
+/// answers with it).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TestOutcome {
+    /// The priority the test was sent at.
+    pub priority: Priority,
+    pub quiet_hours: QuietHoursNow,
+}
+
+/// Whether quiet hours were in force when a test was sent, and what that meant for it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuietHoursNow {
+    /// Outside quiet hours, or quiet hours are off: the test went out at the saved priority.
+    Inactive,
+    /// Inside quiet hours: the test went out at their priority, as alerts do now.
+    Active,
+    /// Inside quiet hours that send no alerts: the test still went out, at the saved priority, while real alerts are
+    /// silenced.
+    Silenced,
 }
 
 /// The grace period a configuration has when it never chose one, which the maintainer settled at 10 seconds.
@@ -163,6 +244,7 @@ impl Default for Settings {
             custom_blocked_criteria: None,
             ask_agents_when_blocked: None,
             grace_period_secs: DEFAULT_GRACE_PERIOD_SECS,
+            quiet_hours: QuietHours::default(),
         }
     }
 }
@@ -186,6 +268,35 @@ impl Settings {
     pub fn asks_agents_when_blocked(&self) -> bool {
         self.ask_agents_when_blocked
             .unwrap_or(self.enabled && self.notify_blocked)
+    }
+
+    /// The priority an alert sent at `local_hour` (0 to 23) goes out at: the quiet-hours priority inside quiet hours,
+    /// else the saved one. `None` means quiet hours send no alerts right now. Says nothing about whether an alert is
+    /// sent at all otherwise; the switches above decide that.
+    pub fn effective_priority(&self, local_hour: u8) -> Option<Priority> {
+        if self.quiet_hours.contains_hour(local_hour) {
+            self.quiet_hours.priority
+        } else {
+            Some(self.priority)
+        }
+    }
+
+    /// What a Send test at `local_hour` does: the priority alerts go out at now, except that quiet hours sending no
+    /// alerts do not stop the test, which then goes at the saved priority so it can still prove the connection
+    /// (SPEC.md, "Settings → Notifications").
+    pub fn test_outcome(&self, local_hour: u8) -> TestOutcome {
+        let (priority, quiet_hours) = if !self.quiet_hours.contains_hour(local_hour) {
+            (self.priority, QuietHoursNow::Inactive)
+        } else {
+            match self.quiet_hours.priority {
+                Some(priority) => (priority, QuietHoursNow::Active),
+                None => (self.priority, QuietHoursNow::Silenced),
+            }
+        };
+        TestOutcome {
+            priority,
+            quiet_hours,
+        }
     }
 }
 
@@ -222,6 +333,10 @@ pub struct SaveSettings {
     /// one above [`MAX_GRACE_PERIOD_SECS`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grace_period_secs: Option<u32>,
+    /// See [`Settings::quiet_hours`]. Absent keeps the stored value, as for `notify_waiting`; the helm refuses hours
+    /// above 23 or a start equal to the end, whether or not quiet hours are on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet_hours: Option<QuietHours>,
 }
 
 #[cfg(test)]
@@ -407,6 +522,126 @@ mod tests {
         let back: Settings =
             serde_json::from_value(serde_json::to_value(&chosen).unwrap()).unwrap();
         assert_eq!(back.grace_period_secs, 0);
+    }
+
+    /// Quiet hours decide whether an alert at a given hour is quiet, and an off-by-one at either end, or a wrap past
+    /// midnight read the wrong way round, would quiet the wrong hours. Specified: the range is half-open, so 22 to 7
+    /// covers 22:00 through 06:59 across midnight and 9 to 17 covers 09:00 through 16:59; quiet hours that are off,
+    /// whose start equals their end, or whose hours exceed 23 contain no hour.
+    #[test]
+    fn quiet_hours_cover_their_half_open_range_and_wrap_past_midnight() {
+        let covered = |start_hour, end_hour| -> Vec<u8> {
+            let quiet = QuietHours {
+                enabled: true,
+                start_hour,
+                end_hour,
+                ..QuietHours::default()
+            };
+            (0..24).filter(|hour| quiet.contains_hour(*hour)).collect()
+        };
+        assert_eq!(covered(22, 7), [0, 1, 2, 3, 4, 5, 6, 22, 23]);
+        assert_eq!(covered(9, 17), [9, 10, 11, 12, 13, 14, 15, 16]);
+        assert_eq!(covered(23, 0), [23]);
+        assert_eq!(covered(0, 23), (0..23).collect::<Vec<_>>());
+        assert!(covered(8, 8).is_empty());
+        assert!(covered(24, 7).is_empty());
+        assert!(covered(22, 30).is_empty());
+        let off = QuietHours {
+            enabled: false,
+            ..QuietHours::default()
+        };
+        assert!((0..24).all(|hour| !off.contains_hour(hour)));
+    }
+
+    /// The priority an alert goes out at, and what Send test reports, follow from the hour and the quiet-hours
+    /// setting, and the test must still go out when quiet hours silence alerts, so a user can check the connection
+    /// then. Specified: outside quiet hours the saved priority, reported inactive; inside, the quiet-hours priority,
+    /// reported active; inside quiet hours set to Off, no alert priority, and a test at the saved priority reported
+    /// silenced.
+    #[test]
+    fn the_effective_priority_and_the_test_outcome_follow_quiet_hours() {
+        let settings = |quiet: Option<Priority>| Settings {
+            priority: Priority::High,
+            quiet_hours: QuietHours {
+                enabled: true,
+                start_hour: 22,
+                end_hour: 7,
+                priority: quiet,
+            },
+            ..Settings::default()
+        };
+        let lowered = settings(Some(Priority::Min));
+        assert_eq!(lowered.effective_priority(12), Some(Priority::High));
+        assert_eq!(lowered.effective_priority(23), Some(Priority::Min));
+        assert_eq!(
+            lowered.test_outcome(12),
+            TestOutcome {
+                priority: Priority::High,
+                quiet_hours: QuietHoursNow::Inactive,
+            }
+        );
+        assert_eq!(
+            lowered.test_outcome(3),
+            TestOutcome {
+                priority: Priority::Min,
+                quiet_hours: QuietHoursNow::Active,
+            }
+        );
+        let silenced = settings(None);
+        assert_eq!(silenced.effective_priority(12), Some(Priority::High));
+        assert_eq!(silenced.effective_priority(6), None);
+        assert_eq!(
+            silenced.test_outcome(6),
+            TestOutcome {
+                priority: Priority::High,
+                quiet_hours: QuietHoursNow::Silenced,
+            }
+        );
+    }
+
+    /// Every configuration saved before quiet hours existed must keep its alerts as they were, an older client's save
+    /// must not reset them, and Off must survive storage as something other than the default. Specified: stored
+    /// settings without the field read as quiet hours off from 22:00 to 07:00 at Low; a save without it decodes as
+    /// none; quiet hours without a priority field read Low, while an explicit null is Off and round-trips as Off; the
+    /// test outcome's wire names are snake case.
+    #[test]
+    fn missing_quiet_hours_read_as_off_and_off_round_trips() {
+        let stored: Settings = serde_json::from_str(
+            r#"{"enabled":true,"server_url":"https://ntfy.sh","topic":"t","priority":"default","token_set":false}"#,
+        )
+        .unwrap();
+        assert_eq!(stored.quiet_hours, QuietHours::default());
+        assert_eq!(
+            QuietHours::default(),
+            QuietHours {
+                enabled: false,
+                start_hour: 22,
+                end_hour: 7,
+                priority: Some(Priority::Low),
+            }
+        );
+        let save: SaveSettings = serde_json::from_str(
+            r#"{"enabled":true,"server_url":"https://ntfy.sh","topic":"t","priority":"default","token":null}"#,
+        )
+        .unwrap();
+        assert_eq!(save.quiet_hours, None);
+        let absent: QuietHours =
+            serde_json::from_str(r#"{"enabled":true,"start_hour":1,"end_hour":2}"#).unwrap();
+        assert_eq!(absent.priority, Some(Priority::Low));
+        let off: QuietHours =
+            serde_json::from_str(r#"{"enabled":true,"start_hour":1,"end_hour":2,"priority":null}"#)
+                .unwrap();
+        assert_eq!(off.priority, None);
+        let back: QuietHours = serde_json::from_value(serde_json::to_value(off).unwrap()).unwrap();
+        assert_eq!(back, off);
+        assert_eq!(
+            serde_json::to_value(TestOutcome {
+                priority: Priority::Low,
+                quiet_hours: QuietHoursNow::Silenced,
+            })
+            .unwrap(),
+            serde_json::json!({"priority": "low", "quiet_hours": "silenced"})
+        );
     }
 
     /// The waiting policy tracks spells only while alerts can actually go out. Specified: on only with the master
