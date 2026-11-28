@@ -165,3 +165,100 @@ verified the fixes (twice for the first and third PRs).
 - Third PR: one real bug: a dropped connection threw away the held alert of an agent that was still blocked. Also tests
   that could pass for the wrong reason, a small timing gap at notify, and the late attention report being dated on
   arrival rather than when you acted.
+
+### Landing
+
+#### What landed with it
+
+Nothing reached main between the executor's last rebase of this plan and its landing, apart from the queue's own
+bookkeeping. It was the only plan in this round, and its three PRs landed one after another within a minute, so nothing
+was built or released from main with the first one's removal of the bell notice but without the second one's red
+indicator.
+
+An independent reviewer and I read the change against what was already on main, mainly the terminal tab strip's overflow
+controls (the terminal-tab-overflow-ux plan, landed just before this one) and the shell tab shortcuts (the
+terminal-tab-shortcuts plan), which sit in the same session pane as this plan's activity report. The activity report
+only listens: it does not take clicks, scrolls, keys or focus from the tab strip or its controls, and a click on the
+strip's own controls counts as activity in that session, which fits your decision that activity inside the open session
+counts. We also checked:
+
+- **The helm's database step.** It adds the table that holds blocked marks and deletes only the old blocked-agent bell
+  notices; every other notice stays. Main had added no database step of its own since the plan was based, so nothing
+  needed renumbering.
+- **The protocol.** No protocol version change is needed: everything the plan changes between programs passes only
+  between the helm and the desktop app, which always come from the same build. What the helm and its supervisors say to
+  each other changed only in comments.
+- **Saved settings.** Saved ntfy settings from before the change read as the report says, and a saved configuration
+  without a grace period reads as the 10 second default.
+- **Clearing the mark and cancelling held alerts.** Stop, Restart, Delete, Replace, a host's removal and a dropped
+  connection each clear the mark or cancel the held alert as the report describes.
+- **The session list's other readers.** The session list's new "blocked" field breaks none of them.
+
+We found nothing that had to be fixed before landing.
+
+Worth knowing, from the review:
+
+- **Quitting Farhelm during the grace period drops the held alert.** Held alerts live only in the running helm, which
+  runs inside the app. If an agent reports blocked (or a session starts waiting) and you quit Farhelm, or it restarts
+  for an update, before the grace period ends, the ntfy alert is never sent. Before this plan it went out within about 3
+  seconds, or at once for a blocked report. The report does not mention this. You could accept it as a consequence of
+  the grace period, or ask for held alerts to be sent at once when the app quits.
+- **Clicks and keys inside the all-tabs list do not count as activity.** The list is drawn above the session pane rather
+  than in it. The click on `▾` that opens it does count, so in practice you have already been counted.
+- **Lowering the grace period does not shorten alerts already held.** Choosing a shorter grace period, Off included,
+  does not release alerts already held: each still waits until the time set when it was held. Turning ntfy alerts, or
+  that kind of alert, off does drop them.
+- **A narrow window after Restart.** The mark is cleared after the restart succeeds, so an agent in the new run that
+  reports blocked before that clear would lose its new mark, and its ntfy alert with it. Agents take seconds to start,
+  so this is unlikely.
+- **Two new tests claim slightly more than they check.** One says a held blocked alert survives a dropped connection,
+  but it stops looking as soon as the host reads connected again, before that first refresh's own clean-up has run, so
+  it does not show that refresh keeps it too. The other says a second, cut-short listing leaves the vanished session's
+  mark alone, but it moves on as soon as another mark from that listing clears, possibly before the listing has judged
+  that session, so it would not notice the mark being wrongly cleared there. In both cases the code does what the test
+  describes; only the tests check less than they say.
+
+Of these, I would take up the quit question if phone alerts matter to you when you leave the desk, and leave the rest
+unless they bother you in use.
+
+#### Fixes made while landing
+
+None.
+
+#### What the landing made untrue in the report
+
+The report's Checks section says that "a key pressed in an open waiting session counts as attending to it". That holds
+for keys that reach the terminal, but not for the app's own shortcuts: reading the code, a key that a shortcut handles
+(the new-tab and close-tab shortcuts, the quick switcher, Rename, quick launch and the others) never reaches the
+activity report, so pressing one in a waiting session does not cancel its held alert. The error runs the safe way: at
+worst an alert goes out that was not needed. Its statement that a click on the tab strip's controls counts holds for the
+strip itself, but not inside the all-tabs list, as above.
+
+#### Checks
+
+Run once, on the plan's three PRs as they landed (main had gained only queue bookkeeping). The plan changes the helm's
+session listing, database and alerts, the channel between the helm and the desktop app, and the app's session list,
+session pane and Settings, so the whole Rust workspace's tests ran, on three boats, with the desktop app's end-to-end
+smoke on a fourth. The rest ran locally:
+
+- `cargo clippy --all-targets`, `cargo clippy -p farhelm --bins` and `cargo clippy -p farhelm-desktop --all-targets`,
+  without `-D warnings`, because one warning already on main since #5120 (an unused method in the helm's ntfy settings
+  code, which the report also mentions) would fail that flag. That was the only warning. With `-D warnings`,
+  `cargo clippy -p farhelm-gui -p farhelm-proto --all-targets`: clean.
+- The whole workspace (`cargo nextest run --workspace --exclude farhelm-desktop`, from one archive split into three
+  parts), recorded runs ca887ae2-f7da-4f9e-bfe1-dc33579f1bd2, 8ba8de46-0cc8-49d6-8528-d239d909b19f and
+  86ecfa46-1178-4ab9-9b05-b289df061204: 9149 tests, 9148 passed, and no test reported that it skipped for a missing
+  system service. The one failure is the test-trace macro's compile contract, which always fails on a boat; run locally
+  (`cargo nextest run -p farhelm-testtrace-macros --test compile_contract`), recorded run
+  18007705-c25e-4ad8-9524-6773b51c14f4, it passed.
+- The desktop end-to-end smoke (`scripts/gui-e2e-smoke.py`, headless on Linux), recorded run
+  b6983d0c-89dc-42ac-a55c-47cac5fd7077: 49 ran and passed, 1 skipped (the paste test, which cannot own the clipboard in
+  a headless session).
+- The screenshot goldens (`python3 scripts/check-gui-goldens.py`), recorded run bc5e56df-8fb4-46cd-bc8b-b6a8c9525ad3: no
+  differences from the published references, the plan's changed Settings pictures included.
+- `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`), `dprint check` on the changed
+  Markdown, docs pages and session-list contract file, `python3 releasing/check-changelog.py format` and the docs site
+  build (`bun run build` in `website/`): passed.
+
+Reused: nothing. Skipped: the opt-in tests (real agents, the real Podman and SSH variants), since the plan touches none
+of what they cover; and any run on a Mac, since none was available to the landing.

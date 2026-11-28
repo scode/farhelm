@@ -12,3 +12,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`drift-conversation-rotation`](reports/drift-conversation-rotation.report.md) landed 2026-11-27 in #5170, #5171: Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
 - [`drift-persistent-hooks`](reports/drift-persistent-hooks.report.md) landed 2026-11-27 in #5173: Add persistent_hooks drift category verifying Grok and Antigravity hooks inside and outside Farhelm
 - [`terminal-tab-overflow-ux`](reports/terminal-tab-overflow-ux.report.md) landed 2026-11-28 in #5176, #5177: Pin the main Agent tab and add auto-scroll, edge fades, arrows, and an all-tabs menu for overflowing tabs
+- [`blocked-notify-attention-and-debounce`](reports/blocked-notify-attention-and-debounce.report.md) landed 2026-11-28 in #5172, #5174, #5178: Move blocked-agent alerts to the red waiting indicator and sound with an ntfy awareness grace period
