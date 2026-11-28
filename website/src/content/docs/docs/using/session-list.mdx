@@ -56,6 +56,12 @@ contains the session's title and host, so avoid sensitive text in titles if you 
 Farhelm waits briefly to avoid alerting on a passing waiting reading and sends once while a session keeps waiting.
 Approval cards and finished turns do not send ntfy alerts.
 
+Each alert then waits out the **Grace period**, 10 seconds unless you choose another, and is not sent if you get to the
+session first: switch to it, type or click in its terminal, or press a key, click or scroll in it while it is open and
+waiting in Farhelm's active window. It is also not sent if the session stops waiting before then. Only what you do in
+that session counts: Farhelm's window being in front, or the session merely being open, does not. Choose **Off** to
+send alerts without the wait.
+
 Keep Farhelm's window open to receive alerts; it can be in the background. See
 [The pieces](/docs/how-it-works/the-pieces/) for which part keeps running.
 

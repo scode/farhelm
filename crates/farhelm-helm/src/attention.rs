@@ -31,7 +31,8 @@ use std::time::{Duration, Instant};
 
 /// `POST /api/sessions/{id}/attention`: the desktop app saying the user attended to this session
 /// ([`SessionAttentionRequest`]). A switch clears the session's blocked mark; an interaction does not. Both reach the
-/// ntfy alerts' awareness hook.
+/// ntfy alerts' awareness hook, dated by the request's age when it has one (the desktop app's throttled interaction
+/// signal is sent after the interaction), and an age over `MAX_ATTENTION_AGE_MS` is refused.
 ///
 /// A helm-local write like `PUT /api/sessions/{id}/seen`, so it does not route through the session's host: a session
 /// on an unreachable host can still be switched to, and its mark cleared. The existence check is the same owner lookup
@@ -44,6 +45,18 @@ pub(crate) async fn attention(
     AxPath(id): AxPath<String>,
     axum::Json(request): axum::Json<SessionAttentionRequest>,
 ) -> impl IntoResponse {
+    // Receipt is read before any await, and the request's age, when it has one, moves the attention back to when the
+    // user acted: a delayed signal must not count the user as aware of what began after they acted.
+    let received = tokio::time::Instant::now();
+    let age = request.age_ms.unwrap_or(0);
+    if age > farhelm_proto::MAX_ATTENTION_AGE_MS {
+        return http_error(anyhow::Error::new(crate::SupervisorError::helm(
+            farhelm_proto::ErrorKind::InvalidRequest,
+            "the attention is older than a minute".into(),
+        )));
+    }
+    // An age reaching back past the clock's start is older than anything an alert could have begun after.
+    let at = received.checked_sub(Duration::from_millis(u64::from(age)));
     let key = match resolve_session_ref(&state, &id).await {
         Ok(key) => key,
         Err(error) => return http_error(error),
@@ -51,7 +64,9 @@ pub(crate) async fn attention(
     if let Err(error) = resolve_owner(&state, &key).await {
         return http_error(error);
     }
-    state.ntfy.note_attention(&key);
+    if let Some(at) = at {
+        state.ntfy.note_attention_at(&key, at);
+    }
     match request.kind {
         SessionAttention::Switch => {
             if let Err(error) = try_clear_blocked(&state, &key).await {
@@ -213,32 +228,37 @@ pub(crate) async fn clear_blocked(state: &AppState, key: &SessionKey) {
 
 /// [`clear`] with the application state's store and feed.
 async fn try_clear_blocked(state: &AppState, key: &SessionKey) -> anyhow::Result<()> {
-    clear(&state.store, state.manager.events(), key).await?;
+    clear(&state.store, state.manager.events(), &state.ntfy, key).await?;
     Ok(())
 }
 
 /// Clear `key`'s blocked mark, returning whether there was one, and pass a removal on to [`cleared_marks`]. Every
-/// clear goes through here; the host refresh, which has no application state, calls it with its own store and feed.
+/// clear goes through here; the host refresh, which has no application state, calls it with its own store, feed and
+/// alerts.
 pub(crate) async fn clear(
     store: &HelmStore,
     events: &FleetEvents,
+    ntfy: &crate::ntfy::Alerts,
     key: &SessionKey,
 ) -> anyhow::Result<bool> {
     let cleared = store.clear_blocked(key).await?;
     if cleared {
-        cleared_marks(events, std::slice::from_ref(key));
+        cleared_marks(events, ntfy, std::slice::from_ref(key));
     }
     Ok(cleared)
 }
 
 /// The one exit for marks that have just left the table, whichever path removed them ([`clear`], or the per-host cap
 /// evicting the oldest when an agent reports: `HelmStore::mark_blocked`'s `evicted`). It wakes clients, since every
-/// such removal changes a listed row. Anything else that must follow a mark's removal, such as withdrawing an alert
-/// still pending for the session, belongs here, so it reaches every exit at once. A host entry's removal is the one
-/// path that does not come here (its rows cascade away in the database); see the module docs.
-pub(crate) fn cleared_marks(events: &FleetEvents, keys: &[SessionKey]) {
+/// such removal changes a listed row, and withdraws a blocked alert still held in its grace period for each session,
+/// since what it reported is over. Anything else that must follow a mark's removal belongs here too, so it reaches
+/// every exit at once. A host entry's removal is the one path that does not come here (its rows cascade away in the
+/// database), so stopping the removed host's connection withdraws its alerts instead (`manager`'s `stop_actor` and
+/// registry reconcile, through [`crate::ntfy::Alerts::cancel_host`]); see the module docs.
+pub(crate) fn cleared_marks(events: &FleetEvents, ntfy: &crate::ntfy::Alerts, keys: &[SessionKey]) {
     if !keys.is_empty() {
         events.bump();
+        ntfy.cancel_blocked(keys);
     }
 }
 

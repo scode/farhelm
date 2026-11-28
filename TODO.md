@@ -68,11 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Blocked notify should also go red-active and ring the bell.** When an agent reported being blocked with
-  `farhelm agent notify`, it generated the ntfy notifications, but did NOT generate a "red active" and bell like when
-  the question tool is used. It should have generated both. Fix that, and overall talk about related tweaks during
-  planning. Plan: `plans/queue/blocked-notify-attention-and-debounce.md`.
-
 - **Control ntfy urgency by schedule.** Allow controlling ntfy urgency by schedule. Plan:
   `plans/queue/ntfy-quiet-hours-urgency.md`.
 
@@ -106,10 +101,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   deletes the session (killing all shell tabs) while Restart is only available for resumable conversations, and closing
   the last tab needs clear session-deletion vs. recovery-card semantics (including managed checkouts and disposable
   sandboxes).
-
-- **Tweak blocked-agent alerts.** Revisit blocked-agent notifications (#5118, #5125, #5135), including stopping
-  Notifications bell notices immediately when **Agent is blocked** is toggled off, along with other adjustments the
-  maintainer has in mind. Plan: `plans/queue/blocked-notify-attention-and-debounce.md`.
 
 - **Let an agent that adds a host start YOLO sessions on it.** We need to make it practical for an agent that adds a
   host to be granted permissions to then start YOLO sessions on it. Details TBD. Circumstances that prompted this: an

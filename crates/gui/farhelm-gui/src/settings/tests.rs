@@ -4528,7 +4528,8 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     let expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved-more",
                                "priority": "high", "token": null, "notify_waiting": true,
                                "notify_blocked": false,
-                           "custom_blocked_criteria": "", "ask_agents_when_blocked": false });
+                           "custom_blocked_criteria": "", "ask_agents_when_blocked": false,
+                           "grace_period_secs": 10 });
     assert_eq!(body, expected);
     assert_eq!(
         preference_work(cx),
@@ -4753,6 +4754,52 @@ fn the_blocked_switch_shows_and_saves_the_stored_choice(cx: &mut TestAppContext)
     assert_eq!(body["notify_blocked"], json!(false));
 }
 
+/// The grace period decides how long an alert is held for the user to see the session first, so the card must show
+/// what the helm stores and send what the user picks. Specified: over
+/// stored settings with no grace period (an older helm's answer), the ntfy alerts card shows 10 s chosen, between the
+/// blocked switch and the server field, with nothing unsaved; pressing Off shows the unsaved line and Save sends
+/// `"grace_period_secs": 0`.
+#[gpui::test]
+fn the_grace_period_shows_and_saves_the_stored_choice(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "default", false),
+    );
+    into_view(cx, "ntfy-grace-10 s");
+    assert_eq!(switch_on(cx, "ntfy-grace-10 s"), Some(true));
+    assert_eq!(switch_on(cx, "ntfy-grace-Off"), Some(false));
+    assert!(
+        bounds(cx, "ntfy-blocked").bottom() < bounds(cx, "ntfy-grace-10 s").top()
+            && bounds(cx, "ntfy-grace-10 s").bottom() < bounds(cx, "ntfy-server").top(),
+        "the grace period sits under the event switches and above the connection fields"
+    );
+    assert!(!drawn(cx, NOTIFICATIONS_SAVE), "nothing unsaved");
+    reach(cx, "ntfy-grace-Off");
+    keys(cx, "space");
+    assert_eq!(switch_on(cx, "ntfy-grace-Off"), Some(true));
+    assert_eq!(
+        label_of(cx, "ntfy-saved-state").as_deref(),
+        Some(ntfy::UNSAVED_LINE)
+    );
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["grace_period_secs"], json!(0));
+}
+
+/// A grace period saved by another client is still shown, not left with nothing chosen. Specified: over stored
+/// settings holding 45 seconds, a 45 s segment is drawn and chosen, and nothing is unsaved.
+#[gpui::test]
+fn a_stored_grace_period_outside_the_presets_is_offered(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let mut stored = ntfy("https://ntfy.sh", "alerts", "default", false);
+    stored["grace_period_secs"] = json!(45);
+    show_ntfy(&mut helm, cx, stored);
+    into_view(cx, "ntfy-grace-45 s");
+    assert_eq!(switch_on(cx, "ntfy-grace-45 s"), Some(true));
+    assert!(!drawn(cx, NOTIFICATIONS_SAVE), "nothing unsaved");
+}
+
 /// SPEC.md: the settings "are explicitly saved helm configuration", and "The stored token is never returned": the form
 /// must send what was typed, show the helm's answer, and then hold no token, or the next Save would send it again,
 /// possibly to another server. Specified: a server, topic and token typed, the switch turned on and High pressed in the
@@ -4780,7 +4827,8 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
     let mut form = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
                            "priority": "high", "token": "browser-token", "notify_waiting": true,
                            "notify_blocked": false,
-                           "custom_blocked_criteria": "", "ask_agents_when_blocked": false });
+                           "custom_blocked_criteria": "", "ask_agents_when_blocked": false,
+                           "grace_period_secs": 10 });
     assert_eq!(body, form);
     assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
     let stored = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",

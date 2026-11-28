@@ -2913,6 +2913,8 @@ Status). Settings saved before the switch existed keep asking exactly when they 
 switch were both on. **ntfy alerts** has an off-by-default **Enable ntfy alerts** switch, under which an **Agent is
 waiting for an answer** switch (on by default, including for settings saved before it existed) chooses the waiting
 alert, and an off-by-default **Agent is blocked** switch chooses the alert an agent sends with `farhelm agent notify`.
+Under them, **Grace period** (Off, 5 s, 10 s, 30 s, 1 min, 2 min; default 10 s) sets how long each alert waits for the
+user to attend to its session first (see Status); a value saved some other way, up to 10 minutes, is offered as well.
 The two cards are one form with one Save. The form also has a server URL (default `https://ntfy.sh`), a topic, an
 optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). The waiting switch says which
 agents it covers, worded from what Farhelm can read on each built-in agent's screen: questions and approvals for some,
@@ -3474,12 +3476,24 @@ off the helm keeps no waiting evidence, and its first observation after they are
 a session already waiting then alerts only for its next wait. Turning ntfy alerts on is deliberately not expected to
 affect existing agents already waiting (confirmed by the maintainer on 2026-11-27). Unknown readings add no evidence and
 do not send. Detection remains heuristic, with the same agent limits as the waiting sound. There are no alerts for
-Farhelm approval cards, finished turns or session-tracking notifications. Window focus does not suppress ntfy alerts.
+Farhelm approval cards, finished turns or session-tracking notifications.
 
 With the **Agent is blocked** switch on as well, the helm also sends an alert each time an agent says it is blocked
 (`farhelm agent notify`, below): "<title> on <host> is blocked: <reason>". It goes through the same queue, rate cap and
 character rules as the waiting alert. Whatever the switches say, the same report marks the session blocked (see Status).
 The reason appears only in the alert; in the app the agent explains itself in its own terminal.
+
+Every alert, waiting or blocked, then waits out a **grace period** (10 seconds by default; Off sends at once; at most 10
+minutes) before it is sent, and is not sent if the user shows meanwhile that they are attending to that session:
+switching to it in an active window, typing into or clicking in its terminal, or pressing a key, clicking or scrolling
+inside it while it is open in an active window and shows as waiting. Attention from the moment the wait or the report
+began counts, the 3-second settling time included; attention before then does not. An alert is also withdrawn when what
+it reports ends first: the session stops waiting for an answer, or its host disconnects (its waiting alert); its blocked
+mark clears (its blocked alert); or its host is removed (both). A blocked alert survives a disconnect, since the mark
+does; a session that was still waiting before a disconnect alerts only for its next wait after the reconnect. Only this
+evidence about the one session counts: window focus, having the session open, and activity anywhere else in the app
+withdraw nothing. The grace period follows the settling time, so by default a waiting alert goes out about 13 seconds
+after the wait began, and the rate cap below applies when an alert is sent.
 
 The alert contains the session's title and the host's display name, with control and other invisible or reordering
 characters removed and each capped at 200 characters: "<title> on <host> is waiting for you". A title generated from a

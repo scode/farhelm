@@ -75,6 +75,25 @@ pub struct Settings {
     /// only a save, which must keep an absent value absent, reads the field itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask_agents_when_blocked: Option<bool>,
+    /// How many seconds an alert that is ready to go out (a session settled into waiting, or an agent said it is
+    /// blocked) is held first, so a user who is already attending to that session sends none: switching to it,
+    /// typing into it, or interacting with it while it is open in an active window withdraws it (SPEC.md, "Ntfy
+    /// alerts"). `0` sends as soon as the alert's own rules allow. Configurations saved before the setting existed
+    /// read as [`DEFAULT_GRACE_PERIOD_SECS`]; at most [`MAX_GRACE_PERIOD_SECS`].
+    #[serde(default = "grace_period_default")]
+    pub grace_period_secs: u32,
+}
+
+/// The grace period a configuration has when it never chose one, which the maintainer settled at 10 seconds.
+pub const DEFAULT_GRACE_PERIOD_SECS: u32 = 10;
+
+/// The longest grace period a save may store: ten minutes, the bound the plan `blocked-notify-attention-and-debounce`
+/// suggested. The Settings card offers up to two minutes and shows any longer stored value as an extra choice.
+pub const MAX_GRACE_PERIOD_SECS: u32 = 600;
+
+/// What an absent `grace_period_secs` means: [`DEFAULT_GRACE_PERIOD_SECS`].
+fn grace_period_default() -> u32 {
+    DEFAULT_GRACE_PERIOD_SECS
 }
 
 /// The blocked-agent instruction's first part, always given while agents are asked to notify when blocked
@@ -143,6 +162,7 @@ impl Default for Settings {
             notify_blocked: false,
             custom_blocked_criteria: None,
             ask_agents_when_blocked: None,
+            grace_period_secs: DEFAULT_GRACE_PERIOD_SECS,
         }
     }
 }
@@ -198,6 +218,10 @@ pub struct SaveSettings {
     /// older than the switch neither turns the instruction on nor off; a client that has the switch always sends it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask_agents_when_blocked: Option<bool>,
+    /// See [`Settings::grace_period_secs`]. Absent keeps the stored value, as for `notify_waiting`; the helm refuses
+    /// one above [`MAX_GRACE_PERIOD_SECS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grace_period_secs: Option<u32>,
 }
 
 #[cfg(test)]
@@ -358,6 +382,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(save.ask_agents_when_blocked, None);
+    }
+
+    /// Every configuration saved before the grace period existed must get the default, not an immediate send, and an
+    /// older client's save must not reset a chosen one. Specified: stored settings without the field read 10 seconds,
+    /// as the defaults do; a save body without it decodes as none; a chosen value round-trips.
+    #[test]
+    fn a_missing_grace_period_reads_as_the_default() {
+        let stored: Settings = serde_json::from_str(
+            r#"{"enabled":true,"server_url":"https://ntfy.sh","topic":"t","priority":"default","token_set":false}"#,
+        )
+        .unwrap();
+        assert_eq!(stored.grace_period_secs, DEFAULT_GRACE_PERIOD_SECS);
+        assert_eq!(Settings::default().grace_period_secs, 10);
+        let save: SaveSettings = serde_json::from_str(
+            r#"{"enabled":true,"server_url":"https://ntfy.sh","topic":"t","priority":"default","token":null}"#,
+        )
+        .unwrap();
+        assert_eq!(save.grace_period_secs, None);
+        let chosen = Settings {
+            grace_period_secs: 0,
+            ..Settings::default()
+        };
+        let back: Settings =
+            serde_json::from_value(serde_json::to_value(&chosen).unwrap()).unwrap();
+        assert_eq!(back.grace_period_secs, 0);
     }
 
     /// The waiting policy tracks spells only while alerts can actually go out. Specified: on only with the master

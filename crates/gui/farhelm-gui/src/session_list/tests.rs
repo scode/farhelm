@@ -566,7 +566,7 @@ pub(super) fn choose_delete(cx: &mut VisualTestContext, button: &'static str) {
 
 /// Answer the commands received since the fake's last command read with empty 200s, in send order. Previously read
 /// commands must have been answered first. Return the envelopes so callers can filter the routes they assert on.
-pub(super) fn acknowledge_commands(fake: &mut FakeHelm) -> Vec<FakeCommand> {
+pub(crate) fn acknowledge_commands(fake: &mut FakeHelm) -> Vec<FakeCommand> {
     let commands = fake.commands();
     for command in &commands {
         fake.reply(command.id, 200, None);

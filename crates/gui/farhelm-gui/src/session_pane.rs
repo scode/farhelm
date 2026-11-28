@@ -99,6 +99,21 @@
 //!   the pane keeps for the window's life: it reads trust, which the helm does not push, and remembers hidden
 //!   occurrences across session switches.
 //!
+//! - **Interaction is attention.** While the open session reads as waiting ([`SessionRow::effectively_waiting`]) in an
+//!   active window ([`ticker::is_active`]), a key pressed with focus inside the pane, or a press or scroll of the
+//!   pointer over it, tells the helm the user is attending to that session (`POST /api/sessions/{id}/attention`,
+//!   `interaction`), which withdraws its ntfy alert during the grace period (SPEC.md, "Ntfy alerts"). Merely having the
+//!   session open is not evidence, so nothing is sent until the user does something; nor is anything sent for events
+//!   elsewhere in the window, behind a dialog over the pane, or in another window. The listeners are passive: they run
+//!   in the capture phase, before the terminal (whose wheel handler stops propagation) sees the event, and take
+//!   nothing from it. They are throttled per session to one signal every [`INTERACTION_GAP`], trailing edge: a burst
+//!   (a trackpad scroll, typing) costs one request now and at most one more at the end of the gap. The window's
+//!   activity and the open session are checked when the event happens; the trailing signal then goes for that session
+//!   even if the user has since left the window or opened another, so a withdrawal is delayed, not swallowed by the
+//!   throttle. It is dropped only if the session no longer reads as waiting by then (nothing is left to withdraw) or
+//!   the pane is gone. A trailing signal carries the age of the interaction it stands for, so the helm counts the user
+//!   aware from the interaction, not from the send: an alert that began in between is not one they saw.
+//!
 //! NOTE: The scrim covers whichever terminal is shown, as the old one covered every pane; a Delete holds back the
 //! notices of all of them.
 
@@ -125,6 +140,8 @@ mod environment_tests;
 #[cfg(test)]
 mod header_tests;
 #[cfg(test)]
+mod interaction_tests;
+#[cfg(test)]
 mod retired_tests;
 #[cfg(test)]
 mod tests;
@@ -133,12 +150,17 @@ mod trust_band_tests;
 #[cfg(test)]
 mod unavailable_tests;
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use farhelm_helm_client::Collections;
+use farhelm_proto::SessionAttention;
 use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Global,
-    InteractiveElement as _, IntoElement, ParentElement, Render, Role, ScrollHandle, Stateful,
-    StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
+    AnyElement, App, AppContext as _, Context, DispatchPhase, Div, Entity, FocusHandle, Global,
+    HitboxBehavior, InteractiveElement as _, IntoElement, KeyDownEvent, MouseDownEvent,
+    ParentElement, Render, Role, ScrollEvent, ScrollHandle, Stateful,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, canvas, div, px,
 };
 
 use crate::components::{Spinner, status_card, status_heading};
@@ -187,6 +209,51 @@ pub(crate) fn chosen(key: &str, mark: Mark, cx: &mut App) {
     chosen.latest = Some((key.to_owned(), mark));
 }
 
+/// The shortest time between two interaction signals for one session (the module docs, "Interaction is attention").
+/// Two seconds keeps a held alert's withdrawal well inside the shortest grace period the Settings card offers (five
+/// seconds), while a burst of keys or scroll steps costs at most one request per gap.
+pub(crate) const INTERACTION_GAP: Duration = Duration::from_secs(2);
+
+/// When the pane last sent an interaction signal for each session still within its gap, and when the latest
+/// interaction it held back for each session happened: the throttle's whole state. Pure over the times it is given, so
+/// the pane reads the clock (the executor's, which tests control) and this only decides. `sent` entries go once their
+/// gap has passed and `held_back` ones when their trailing signal goes, so it holds at most the few sessions acted on
+/// in the last gap.
+#[derive(Default)]
+struct Interactions {
+    sent: HashMap<String, Instant>,
+    /// The trailing signal reports how long ago this was, so the helm dates the attention by the latest held-back
+    /// interaction rather than by the send (`SessionAttentionRequest::age_ms`).
+    held_back: HashMap<String, Instant>,
+}
+
+impl Interactions {
+    /// Whether an interaction with `key` at `now` is sent now (`None`, recorded as sent) or must wait the returned
+    /// time for the gap since the last signal for the same session to pass. The gap is per session: another session's
+    /// signal never waits.
+    fn admit(&mut self, key: &str, now: Instant) -> Option<Duration> {
+        self.sent
+            .retain(|_, at| now.saturating_duration_since(*at) < INTERACTION_GAP);
+        if let Some(at) = self.sent.get(key) {
+            return Some(INTERACTION_GAP - now.saturating_duration_since(*at));
+        }
+        self.sent.insert(key.to_owned(), now);
+        None
+    }
+}
+
+/// Whether the session filed under `key` reads as waiting ([`SessionRow::effectively_waiting`]) in the current UI
+/// session's store: the condition for every interaction signal, since an alert is held only for such a session.
+fn reads_waiting(key: &str, cx: &App) -> bool {
+    session::current_store(cx).is_some_and(|store| {
+        store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(key)
+            .is_some_and(SessionRow::effectively_waiting)
+    })
+}
+
 /// The main pane. The main view holds one for the window's life.
 ///
 /// Like the session list, it must be made after the connection ([`session::start`]): it observes the connection it
@@ -227,6 +294,11 @@ pub struct SessionPane {
     /// Act on a change of the selection, of the user's choice, of the connection and of the open session's card, and
     /// redraw when the trust hint band's state changes.
     _observing: Vec<Subscription>,
+    /// The interaction signal's throttle (the module docs, "Interaction is attention").
+    interactions: Interactions,
+    /// The trailing signal a throttled interaction left to send at the end of the gap, per session: at most one each.
+    /// Dropping one (the pane going) cancels it.
+    trailing: HashMap<String, ticker::Deadline>,
 }
 
 /// What the pane keeps for the open session: the session's key, the terminals it shows (the session's agent terminal
@@ -409,6 +481,8 @@ impl SessionPane {
             trust_band,
             hook_band,
             _observing: observing,
+            interactions: Interactions::default(),
+            trailing: HashMap::new(),
         }
     }
 
@@ -615,6 +689,87 @@ impl SessionPane {
             .map(|mounted| mounted.key.clone())
     }
 
+    /// The user pressed a key, or pressed or scrolled the pointer, inside the pane: if the window is active and the
+    /// open session reads as waiting, send the interaction signal for it, now or at the end of the throttle's gap (the
+    /// module docs, "Interaction is attention").
+    fn interacted(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !ticker::is_active(window, cx) {
+            return;
+        }
+        let Some(key) = self.open_key(cx) else {
+            return;
+        };
+        if reads_waiting(&key, cx) {
+            let now = cx.background_executor().now();
+            self.signal(key, now, cx);
+        }
+    }
+
+    /// Send the interaction signal for `key`, for an interaction at `acted` that the caller has already checked, or
+    /// leave one trailing signal to send at the end of the gap. The trailing signal checks only that `key` still reads
+    /// as waiting: the interaction it stands for happened in an active window with `key` open, whatever has changed
+    /// since. It carries that interaction's age, so the helm counts the user aware from then, not from the send, and
+    /// an alert that began in between stays.
+    fn signal(&mut self, key: String, acted: Instant, cx: &mut Context<Self>) {
+        let now = cx.background_executor().now();
+        let Some(wait) = self.interactions.admit(&key, now) else {
+            self.trailing.remove(&key);
+            self.interactions.held_back.remove(&key);
+            let age = Some(now.saturating_duration_since(acted)).filter(|age| !age.is_zero());
+            session_list::selection::send_attention(&key, SessionAttention::Interaction, age, cx);
+            return;
+        };
+        self.interactions.held_back.insert(key.clone(), acted);
+        if self.trailing.contains_key(&key) {
+            return;
+        }
+        // On the ticker's deadline, the GUI's one source of timers.
+        let (pane, pending) = (cx.weak_entity(), key.clone());
+        let deadline = ticker::after(wait, cx, move |cx| {
+            let _ = pane.update(cx, |pane, cx| {
+                pane.trailing.remove(&pending);
+                let acted = pane.interactions.held_back.remove(&pending);
+                if let Some(acted) = acted
+                    && reads_waiting(&pending, cx)
+                {
+                    pane.signal(pending, acted, cx);
+                }
+            });
+        });
+        self.trailing.insert(key, deadline);
+    }
+
+    /// The pane's pointer listeners for the interaction signal, as an element that draws nothing over the whole pane.
+    /// Its hitbox, inserted after everything the pane draws, says whether a press or scroll is over the pane and not
+    /// under something that blocks the pointer (a dialog's backdrop); the listeners themselves see every event in the
+    /// window, in the capture phase, and leave it alone.
+    fn interaction_watch(cx: &Context<Self>) -> impl IntoElement {
+        let pane = cx.weak_entity();
+        canvas(
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+            move |_, hitbox, window, _| {
+                let pressed = (pane.clone(), hitbox.clone());
+                window.on_mouse_event(move |_: &MouseDownEvent, phase, window, cx| {
+                    let (pane, hitbox) = &pressed;
+                    if phase == DispatchPhase::Capture && hitbox.is_hovered(window) {
+                        let _ = pane.update(cx, |pane, cx| pane.interacted(window, cx));
+                    }
+                });
+                let scrolled = (pane.clone(), hitbox);
+                window.on_mouse_event(move |_: &ScrollEvent, phase, window, cx| {
+                    let (pane, hitbox) = &scrolled;
+                    if phase == DispatchPhase::Capture && hitbox.should_handle_scroll(window) {
+                        let _ = pane.update(cx, |pane, cx| pane.interacted(window, cx));
+                    }
+                });
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
     /// Focus the terminal of the session the user last chose, once per choice, if it is the one mounted. A choice of
     /// another session (one the selection did not take) is dropped.
     fn act_on_choice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -795,10 +950,18 @@ impl Render for SessionPane {
         // steady state"; the lines and the bands show only while there is something to say), then the details bar.
         // The bar comes last in drawing order as well as on screen, so its controls follow the top row and the terminal
         // in Tab's order (SPEC.md: "Keyboard order follows the top row, terminal, then bottom bar").
+        //
+        // The pane's interaction listeners (the module docs, "Interaction is attention"): keys in the capture phase on
+        // the root, so only a key whose focus is inside the pane counts, and the pointer's watch drawn last, so its
+        // hitbox is in front of everything the pane draws.
         div()
+            .relative()
             .flex()
             .flex_col()
             .size_full()
+            .capture_key_down(cx.listener(|pane, _: &KeyDownEvent, window, cx| {
+                pane.interacted(window, cx);
+            }))
             .child(header)
             .children(lines)
             .children(trust)
@@ -817,6 +980,7 @@ impl Render for SessionPane {
                     .child(crate::approvals::region::track_terminal_area(window, cx)),
             )
             .children(bar)
+            .child(Self::interaction_watch(cx))
             .into_any_element()
     }
 }

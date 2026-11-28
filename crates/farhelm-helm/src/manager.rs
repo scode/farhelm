@@ -74,7 +74,7 @@ use crate::client::{SessionListing, SupervisorClient, SupervisorError, Superviso
 use crate::environment::{ConnectedResources, EnvironmentStatus, Providers, StatusUnanswered};
 use crate::session_cache::{creation_order, eviction_victim, merge_cached_session};
 use crate::store::{
-    DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
+    DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError, SessionKey,
 };
 use anyhow::Context as _;
 use farhelm_proto::io::VersionSkew;
@@ -2055,6 +2055,10 @@ impl ConnectionManager {
                 }
             });
             handle.task.abort();
+            // The aborted actor never reaches its own withdrawal at the end
+            // of `serve`, and the removed rows cascade past
+            // `attention::cleared_marks`, so withdraw the host's held alerts here.
+            self.ntfy.cancel_host(*id);
             false
         });
         // Handles released as this reconcile installs them; the actors
@@ -3724,6 +3728,11 @@ impl ConnectionManager {
             }
         };
         retire_withdrawn(withdrawn);
+        // The aborted actor never reaches its own withdrawal at the end of
+        // `serve`, and the removed rows cascade past
+        // `attention::cleared_marks`, so withdraw the host's held alerts here,
+        // as the reconcile does for the hosts it stops.
+        self.ntfy.cancel_host(host);
         // A removed host disappears from the hosts list and takes its
         // sessions with it — a registry shape change, and the one that
         // arrives by this path rather than through `sync_registry`'s
@@ -5770,12 +5779,17 @@ impl HostActor {
                     .as_ref()
                     .is_some_and(|current| Arc::ptr_eq(current, &client));
                 if current && let Some(observations) = &alert_observations {
-                    for title in alert_policy.observe(
+                    for settled in alert_policy.observe(
                         observations,
                         tokio::time::Instant::now(),
                         self.store.waiting_alerts_enabled(),
                     ) {
-                        self.ntfy.enqueue(title, self.id);
+                        self.ntfy.enqueue(self.id, settled);
+                    }
+                    // A spell that ended withdraws its alert if it is still in
+                    // the grace period: the session no longer waits for the user.
+                    for id in alert_policy.take_ended() {
+                        self.ntfy.cancel_waiting(&SessionKey::new(self.id, id));
                     }
                 }
                 current
@@ -5893,6 +5907,13 @@ impl HostActor {
             reason = ended,
             "dropped the connection to the host supervisor; re-entering active retries"
         );
+        // The policy that settled this connection's waiting spells goes with
+        // it, so nothing would ever end them: withdraw the waiting alerts
+        // still in the grace period. The next connection baselines afresh
+        // (SPEC.md, "Ntfy alerts"). Blocked alerts stay: their marks outlive
+        // the connection, and the next accepted listing clears a mark whose
+        // session is over, which withdraws its alert.
+        self.ntfy.cancel_host_waiting(self.id);
         // Dropping the last handle is what actually tears the transport
         // down (see `SupervisorClient`'s task-weakness discipline), so the
         // client must leave the published status before the next attempt
@@ -5948,7 +5969,9 @@ impl HostActor {
                 continue;
             }
             let key = crate::store::SessionKey::new(self.id, &session_id);
-            if let Err(error) = crate::attention::clear(&self.store, &self.events, &key).await {
+            if let Err(error) =
+                crate::attention::clear(&self.store, &self.events, &self.ntfy, &key).await
+            {
                 warn!(
                     session_id = peer_text(&session_id).as_str(),
                     error = %error,
@@ -10284,6 +10307,7 @@ mod tests {
             notify_blocked: Some(false),
             custom_blocked_criteria: None,
             ask_agents_when_blocked: None,
+            grace_period_secs: None,
             enabled: true,
             server_url: "https://ntfy.example".into(),
             topic: "deadline-tests".into(),
