@@ -737,6 +737,16 @@ session's card), or on the unavailable card while it shows in the open session's
 view only when none of those is on screen, so a key press always reaches Farhelm's own key bindings rather than GPUI
 Kit's.
 
+The session view's terminal tab strip (`terminal::set`) keeps its own reveal, as virtualized lists do. It scrolls a
+focused tab, close button or New terminal (or, in a strip too narrow to pin it, the main tab) into view once per control
+focus reaches, and the chosen tab once each time the choice changes, through one request that the choice arms and the
+strip's next draw spends, so a later wheel turn is never pulled back. When focus reaches a strip control in the same
+frame as a choice, the focused control wins and the choice's request is dropped. A change of layout reveals the focused
+control and the chosen tab again, since it moves them. GPUI places a reveal against where the frame before left the
+strip's scrolling part, so a draw that moves that part (the strip's first, a change of layout or width) asks once more
+in the next frame. Whether the strip pins its main tab and New terminal is decided from its own and its main tab's
+widths as last laid out, neither of which depends on that decision, so a change of width settles within a frame.
+
 ### Overlays: the layer manager
 
 Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the pill slots, attention

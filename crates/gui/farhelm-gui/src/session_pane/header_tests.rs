@@ -2503,12 +2503,23 @@ struct RealPane {
 impl RealPane {
     /// The pane `width` pixels wide over `snapshot`, not yet drawn.
     fn open(width: f32, snapshot: Vec<CollectionState>) -> RealPane {
+        RealPane::open_with(width, snapshot, |_| {})
+    }
+
+    /// [`RealPane::open`], with `before` run on the app once it is set up and before the pane is made: for state the
+    /// pane reads as it opens, such as a remembered shell tab.
+    fn open_with(
+        width: f32,
+        snapshot: Vec<CollectionState>,
+        before: impl FnOnce(&mut gpui::App),
+    ) -> RealPane {
         let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
             assets::UI_FONT,
         ));
         let mut cx =
             HeadlessAppContext::with_platform(text_system, Arc::new(assets::Assets), || Ok(None));
         cx.update(bootstrap::install).unwrap();
+        cx.update(before);
         let (mut fake, handle, events) = FakeHelm::new();
         let connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
         cx.run_until_parked();
@@ -2588,6 +2599,35 @@ impl RealPane {
         self.cx
             .update_window(self.window, |_, window, _| window.driver_nodes().to_vec())
             .unwrap()
+    }
+
+    /// Draw exactly one frame, without first running what the last one asked for, and return its driver record: for a
+    /// test of what the first frame after a change shows, which [`RealPane::draw`]'s later frames would mend.
+    fn draw_once(&mut self) -> Vec<gpui::DriverNode> {
+        self.cx
+            .update_window(self.window, |_, window, cx| {
+                window.set_driver_enabled(true);
+                window.draw(cx).clear(cx);
+                window.driver_nodes().to_vec()
+            })
+            .unwrap()
+    }
+
+    /// The open session's terminal set.
+    fn terminal_set(&mut self) -> Entity<crate::terminal::set::TerminalSet> {
+        let pane = self.pane.clone();
+        self.cx.update(|cx| {
+            pane.update(cx, |pane, cx| pane.terminal_set(cx))
+                .expect("the pane is alive")
+                .expect("a session is open")
+        })
+    }
+
+    /// The shell tab the open session shows, `None` for its main terminal.
+    fn chosen(&mut self) -> Option<String> {
+        let set = self.terminal_set();
+        self.cx
+            .update(|cx| set.read(cx).chosen().map(str::to_owned))
     }
 
     /// Make the window `width` pixels wide, as the platform reports a resize.
@@ -2980,13 +3020,14 @@ fn a_short_row_shares_its_width_with_the_strip_down_to_its_floor() {
 
 /// Opening more terminals than fit used to leave New terminal at the end of the tabs, scrolled out of view, so the user
 /// could not reach it to open another (TODO.md's "Keep the new-terminal button reachable when terminal tabs
-/// overflow"). Pinned at the strip's right end, it stays in view however many tabs are open. Specified: in a 900-pixel
-/// pane, for a container environment's session with twelve shell tabs, the last tab is not wholly visible (the premise:
-/// the tabs overflow the strip), while New terminal is drawn whole, ends inside the strip, and ends left of the first
-/// text size control.
+/// overflow"). Pinned at the strip's right end, it stays in view however many tabs are open, and the main tab, pinned
+/// at the left end, likewise (the overflowing-tabs plan's decision). Specified: in a 900-pixel pane, for a container
+/// environment's session with twelve shell tabs, the last tab is not wholly visible (the premise: the tabs overflow the
+/// strip), while New terminal is drawn whole, ends inside the strip, and ends left of the first text size control; and
+/// the Agent tab is drawn whole, starting the strip, outside the part that scrolls, which holds the last shell tab.
 #[test]
 fn many_tabs_keep_new_terminal_in_view_at_the_strips_end() {
-    use crate::terminal::set::{ADD_ID, STRIP_ID, tab_element_id};
+    use crate::terminal::set::{ADD_ID, AGENT_TAB_ID, STRIP_ID, STRIP_TABS_ID, tab_element_id};
     use crate::terminal::text_size::SMALLER_ID;
     let ids: Vec<String> = (1..=12).map(|n| format!("t{n}")).collect();
     let tabs: Vec<&str> = ids.iter().map(String::as_str).collect();
@@ -3012,6 +3053,35 @@ fn many_tabs_keep_new_terminal_in_view_at_the_strips_end() {
         add.bounds,
         add.visible_bounds
     );
+    let agent = only_node(&nodes, AGENT_TAB_ID);
+    assert!(
+        agent.visible_bounds == agent.bounds
+            && (agent.bounds.left() - strip.left()).abs() < px(0.5)
+            && !drawn_under(&nodes, AGENT_TAB_ID, STRIP_TABS_ID),
+        "the Agent tab is whole, starts the strip and is pinned: Agent {:?}, visible {:?}, strip {strip:?}",
+        agent.bounds,
+        agent.visible_bounds
+    );
+    assert!(
+        drawn_under(&nodes, &tab_element_id("t12"), STRIP_TABS_ID),
+        "a shell tab is in the part that scrolls, so the Agent tab's place outside it means something"
+    );
+}
+
+/// Whether the element `id` in `nodes` is drawn under the element `ancestor`, by the frame's own parent links: here,
+/// whether a strip control sits in the part that scrolls or at a pinned end.
+fn drawn_under(nodes: &[gpui::DriverNode], id: &str, ancestor: &str) -> bool {
+    let mut at = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+        .unwrap_or_else(|| panic!("{id} was not drawn"));
+    while let Some(parent) = nodes[at].parent {
+        if nodes[parent].element_id.as_deref() == Some(ancestor) {
+            return true;
+        }
+        at = parent;
+    }
+    false
 }
 
 /// SPEC.md keeps the tunnel pill fully visible down to a 650-pixel pane, and a pill counting two or more tunnels has
@@ -3063,7 +3133,9 @@ fn a_count_pill_at_650_pixels_keeps_its_whole_width() {
 /// gives up nearly all of its 112-pixel floor (`header/fit.rs`), leaving it narrower than a single tab, so its controls
 /// stay usable only through that scrolling: one that took focus out of view would be invisible. Specified: in a
 /// 650-pixel pane, for a container environment's session with one shell tab, once the terminal lists one tunnel to a
-/// very long host name, the strip is narrower than its Agent tab alone; the Agent tab, the shell tab, its × and New
+/// very long host name, the strip is narrower than its Agent tab alone; too narrow to pin its ends, it draws the Agent
+/// tab and New terminal inside the part that scrolls (`TerminalSet`'s narrow-strip fallback: pinned, an Agent tab
+/// wider than the strip would leave the shell tab no room at all); the Agent tab, the shell tab, its × and New
 /// terminal are each drawn once and track a focus handle; pressing Tab from where focus starts reaches each of them
 /// within 40 presses (their order is the terminal set's tests',
 /// `tab_reaches_each_tab_then_its_close_then_new_terminal`). Each focused control reveals a recognizable portion,
@@ -3073,7 +3145,9 @@ fn a_count_pill_at_650_pixels_keeps_its_whole_width() {
 /// (`keyboard_focus_on_a_tab_or_its_close_shows_the_close`).
 #[test]
 fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
-    use crate::terminal::set::{ADD_ID, AGENT_TAB_ID, STRIP_ID, close_element_id, tab_element_id};
+    use crate::terminal::set::{
+        ADD_ID, AGENT_TAB_ID, STRIP_ID, STRIP_TABS_ID, close_element_id, tab_element_id,
+    };
     let mut pane = RealPane::open(650., environment_session_with_tabs(&["t1"]));
     pane.draw();
     pane.open_tunnel(&long_host());
@@ -3085,6 +3159,12 @@ fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
         strip.size.width < agent.size.width,
         "the premise: the strip is narrower than its Agent tab alone: strip {strip:?}, Agent {agent:?}"
     );
+    for id in [AGENT_TAB_ID, ADD_ID] {
+        assert!(
+            drawn_under(&nodes, id, STRIP_TABS_ID),
+            "{id} falls back into the part that scrolls"
+        );
+    }
     let close = close_element_id("t1");
     let controls = [
         AGENT_TAB_ID.to_owned(),
@@ -3136,6 +3216,126 @@ fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
         reached.len(),
         controls.len(),
         "Tab reaches each of the strip's controls; reached {reached:?}"
+    );
+}
+
+/// A tunnel pill appears a few frames after a pane opens, and at 650 pixels it narrows the strip so far that the strip
+/// changes layout, from pinning its ends to scrolling everything. The restored tab had been revealed in the pinned
+/// layout, and the change kept the strip's offset, which in a strip that narrow left the tab past its end, wholly out of
+/// view, against the overflowing-tabs plan's criterion that a restored tab is always scrolled into view. So a change of
+/// layout reveals the chosen tab again; and since GPUI places that reveal against the viewport the frame before left,
+/// which was the old layout's, the strip asks once more after a frame that moved the viewport (`TerminalSet::strip`).
+/// Specified: in a 650-pixel pane, for a container environment's session with three shell tabs and Terminal 3
+/// remembered, with the terminal's one tunnel (to a very long host name) listed before the pane first draws, once the
+/// pane has drawn and settled, Terminal 3 is restored, the pill is drawn, and the strip is narrower than its Agent tab
+/// and scrolls the Agent tab with the shell tabs (the premises: at the strip's start the Agent tab fills it and no shell
+/// tab shows); the Agent tab is out of view, so the strip scrolled; and Terminal 3, wider than the strip, is drawn from
+/// its start, at the scrolling part's left edge, with some of it visible.
+#[test]
+fn a_tab_restored_beside_a_pill_at_650_pixels_is_scrolled_into_view() {
+    use crate::terminal::set::{
+        AGENT_TAB_ID, STRIP_ID, STRIP_TABS_ID, remember_shown, tab_element_id,
+    };
+    let mut pane = RealPane::open_with(
+        650.,
+        environment_session_with_tabs(&["t1", "t2", "t3"]),
+        |cx| remember_shown("a", "t3", cx),
+    );
+    pane.cx.run_until_parked();
+    pane.open_tunnel(&long_host());
+    pane.draw();
+    let nodes = pane.draw();
+    assert_eq!(
+        pane.chosen().as_deref(),
+        Some("t3"),
+        "the premise: restored"
+    );
+    only_node(&nodes, "session-tunnel-pill");
+    let strip = only_node(&nodes, STRIP_ID).bounds;
+    let agent = only_node(&nodes, AGENT_TAB_ID);
+    assert!(
+        strip.size.width < agent.bounds.size.width
+            && drawn_under(&nodes, AGENT_TAB_ID, STRIP_TABS_ID),
+        "the premise: the strip is narrower than its Agent tab and scrolls it: strip {strip:?}, Agent {:?}",
+        agent.bounds
+    );
+    assert!(
+        agent.visible_bounds.size.width <= px(0.),
+        "the strip scrolled away from its start: Agent {:?}, visible {:?}",
+        agent.bounds,
+        agent.visible_bounds
+    );
+    let tabs = only_node(&nodes, STRIP_TABS_ID).bounds;
+    let t3 = only_node(&nodes, &tab_element_id("t3"));
+    assert!(
+        t3.visible_bounds.size.width > px(0.) && (t3.bounds.left() - tabs.left()).abs() < px(0.5),
+        "the restored tab is drawn from its start at the strip's edge: Terminal 3 {:?}, visible {:?}, scrolling \
+         part {tabs:?}",
+        t3.bounds,
+        t3.visible_bounds
+    );
+}
+
+/// The overflowing-tabs plan asks for a tab New terminal opens to be scrolled into view on the very frame it first
+/// enters the strip's layout, not a frame later: until then the user would see the new shell's terminal with no tab
+/// for it. GPUI places the reveal against that frame's item positions, so it lands at once whenever the frame leaves
+/// the strip's visible part where the last one did (`TerminalSet::reveal_chosen`); a later frame would hide a reveal
+/// that missed, so this draws only the one. Specified: in a 1400-pixel pane (whose strip is wider than a tab), for a
+/// container environment's session with twenty shell tabs (the premise: the last is not wholly visible), New terminal's
+/// request answered with t21 and the row then listing t1 to t21, the one frame drawn after that shows t21 chosen (the
+/// premise) and its tab drawn whole.
+#[test]
+fn a_tab_new_terminal_opens_is_whole_in_the_first_frame_that_draws_it() {
+    use crate::terminal::set::{TerminalSet, tab_element_id};
+    let mut ids: Vec<String> = (1..=20).map(|n| format!("t{n}")).collect();
+    let tabs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut pane = RealPane::open(1400., environment_session_with_tabs(&tabs));
+    let nodes = pane.draw();
+    let last = only_node(&nodes, &tab_element_id("t20"));
+    assert!(
+        last.visible_bounds.size.width < last.bounds.size.width,
+        "the premise: the tabs overflow the strip: last tab {:?}, visible {:?}",
+        last.bounds,
+        last.visible_bounds
+    );
+    let set = pane.terminal_set();
+    pane.cx
+        .update_window(pane.window, |_, window, cx| {
+            TerminalSet::open_from_shortcut(&set, window, cx)
+        })
+        .unwrap();
+    pane.cx.run_until_parked();
+    // The fake helm answers in order: whatever the pane sent before New terminal's request succeeds with no body.
+    let mut opened = false;
+    for command in pane.fake.commands() {
+        if command.method == Method::Post && command.path == "/api/sessions/a/tabs" {
+            opened = true;
+            pane.fake
+                .reply(command.id, 200, Some(json!({ "tab": { "id": "t21" } })));
+        } else {
+            pane.fake.reply(command.id, 200, None);
+        }
+    }
+    assert!(opened, "the premise: New terminal sent its request");
+    pane.cx.run_until_parked();
+    ids.push("t21".to_owned());
+    let tabs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let sessions = environment_session_with_tabs(&tabs).remove(0);
+    pane.fake.push(CollectionChanges {
+        collection: Collection::Sessions,
+        meta: sessions.meta,
+        upsert: sessions.entries,
+        remove: Vec::new(),
+    });
+    pane.cx.run_until_parked();
+    let nodes = pane.draw_once();
+    assert_eq!(pane.chosen().as_deref(), Some("t21"), "the premise: chosen");
+    let new = only_node(&nodes, &tab_element_id("t21"));
+    assert!(
+        new.visible_bounds == new.bounds && new.bounds.size.width > px(0.),
+        "the new tab is whole in its first frame: {:?}, visible {:?}",
+        new.bounds,
+        new.visible_bounds
     );
 }
 

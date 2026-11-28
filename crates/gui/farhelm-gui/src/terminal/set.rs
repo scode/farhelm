@@ -52,6 +52,21 @@
 //!   anchor for the question, and the strip's layout never depends on the pointer. The Agent tab has neither mark
 //!   nor ×.
 //!
+//! - **Only the shell tabs scroll.** The main tab (Agent, or Shell) is pinned at the strip's left end and New terminal
+//!   at its right end, outside the part that scrolls, so however many tabs are open the main terminal stays one press
+//!   away (the maintainer's decision for the overflowing-tabs plan, `terminal-tab-overflow-ux`) and adding a tab never
+//!   moves New terminal. A strip too narrow to pin both and still show a control's width of shell tabs (a 650-pixel
+//!   pane beside a tunnel pill, where the top row's fit leaves the strip less than the main tab's own width) puts
+//!   everything back in the scrolling part instead, so every control stays reachable ([`StripLayout`]).
+//!
+//! - **The chosen tab is scrolled into view, once per choice.** Any way the choice changes (a press, a shortcut, a New
+//!   terminal the user waited for, a close's fallback, a restore) arms one request, which the strip's next draw spends
+//!   ([`TerminalSet::reveal_chosen`]); the wheel then moves the strip freely, since nothing is left to pull it back.
+//!   A draw that moves the strip's visible part as it spends the request (its first, a change of layout or width) asks
+//!   once more in the next, since GPUI places a reveal where the frame before left that part. A change of layout, which
+//!   the strip makes itself when its width crosses a tier, reveals the chosen tab again, as it does a focused control.
+//!   Keyboard focus reaching a strip control in the same frame takes precedence, and the request is dropped.
+//!
 //! - **The choice survives a new view.** Reopening a session or reconnecting to the helm shows the remembered shell
 //!   tab if it has a terminal in the set. A deliberate selection or a close fallback updates the choice, and either
 //!   can clear it by choosing Agent. A missing tab or a refused initial attach during restore leaves the choice
@@ -101,15 +116,22 @@ use crate::theme;
 /// How many tabs are attached at most (the old app's `MAX_MOUNTED_TAB_ISLANDS`). See the module docs.
 pub(crate) const MAX_ATTACHED_TABS: usize = 32;
 
-/// The strip's element id: the whole tab area, its scrolling tabs and New terminal pinned after them.
+/// The strip's element id: the whole tab area, the main tab pinned at its left, the scrolling shell tabs, and New
+/// terminal pinned after them.
 pub(crate) const STRIP_ID: &str = "session-terminal-tabs";
 
-/// The element id of the strip's part that scrolls: the Agent tab and the shell tabs, without the divider and New
-/// terminal, which stay put at the strip's right end ([`TerminalSet::strip`]).
+/// The element id of the strip's part that scrolls: the shell tabs, without the main tab before them or the divider
+/// and New terminal after them, which stay put at the strip's ends; in a strip too narrow to pin those
+/// ([`StripLayout::Scrolling`]), all of them ([`TerminalSet::strip`]).
 pub(crate) const STRIP_TABS_ID: &str = "session-terminal-tabs-scroll";
 
 /// The agent terminal's tab's element id.
 pub(crate) const AGENT_TAB_ID: &str = "session-terminal-tab-agent";
+
+/// The element id of the box around the agent terminal's tab, which records the tab's laid-out width for
+/// [`StripLayout::at`] (an element's bounds are known only to a scroll handle it tracks, and a [`Button`] tracks none).
+/// Not under the tabs' own `session-terminal-tab-` prefix, which names buttons.
+const AGENT_SLOT_ID: &str = "session-terminal-agent-slot";
 
 /// The element id of the notice a tab past [`MAX_ATTACHED_TABS`] shows in place of a terminal.
 pub(crate) const NOT_ATTACHED_ID: &str = "terminal-not-attached";
@@ -268,17 +290,81 @@ const ADD_DIVIDER_MARGIN: f32 = 2.;
 const PINNED_ADD_WIDTH: f32 =
     STRIP_GAP + ADD_DIVIDER_MARGIN + ADD_DIVIDER_WIDTH + ADD_DIVIDER_MARGIN + STRIP_GAP + ADD_SIDE;
 
-/// The least width the scrolling tabs keep beside a pinned New terminal: a control's worth, so a focused tab or × is
-/// still recognizable when scrolled into view (SPEC.md keeps the top row reachable down to a 650-pixel pane). A strip
-/// narrower than New terminal and this together draws New terminal at the end of the scrolling tabs instead
-/// ([`TerminalSet::pins_add`]).
+/// The least width the scrolling shell tabs keep between the pinned main tab and the pinned New terminal: a control's
+/// worth, so a focused tab or × is still recognizable when scrolled into view (SPEC.md keeps the top row reachable down
+/// to a 650-pixel pane). A strip narrower than the three together scrolls everything instead ([`StripLayout::at`]).
 const PINNED_TABS_FLOOR: f32 = ADD_SIDE;
 
-/// Whether a strip `width` wide pins New terminal at its end ([`TerminalSet::pins_add`]). A zero width is taken for a
-/// strip not laid out yet and pins; a strip really laid out at zero width (only in a pane narrower than the 650 pixels
-/// SPEC.md keeps the row whole for, where clipping is allowed) shows no tab either way.
-fn pins_add_at(width: Pixels) -> bool {
-    width == px(0.) || width >= px(PINNED_ADD_WIDTH + PINNED_TABS_FLOOR)
+/// Which of the strip's controls stay put while the shell tabs scroll: its width tiers. Chosen from widths that do not
+/// depend on the layout ([`StripLayout::at`]), so the strip settles on one within a frame of any change of width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StripLayout {
+    /// The main tab at the strip's left end and the divider and New terminal at its right end, outside the scrolling
+    /// part, which holds only the shell tabs.
+    Pinned,
+    /// Everything in the scrolling part, in the same order: the main tab, the shell tabs, the divider and New terminal.
+    /// For a strip too narrow to pin the ends and still leave the shell tabs a control's width, where a pinned end would
+    /// leave some control no room to be scrolled into view.
+    ///
+    /// There is no middle tier with New terminal still pinned and only the main tab scrolling, although that would keep
+    /// New terminal in place in more strips: the band it would cover includes the strip's floor beside a tunnel pill
+    /// ([`STRIP_FLOOR_BESIDE_PILL`], 112 pixels), where a pinned New terminal would leave the shell tabs about 75
+    /// pixels, less than one tab, while scrolling everything shows a whole tab. So in that band New terminal moves as
+    /// tabs are added, as it did before it was pinned at all.
+    Scrolling,
+}
+
+impl StripLayout {
+    /// The layout of a strip `strip` wide whose main tab is `agent` wide, as each was last laid out, with or without
+    /// shell tabs: pinned when the strip holds the main tab, New terminal and (when there are shell tabs) a gap and a
+    /// control's width of them ([`PINNED_TABS_FLOOR`]) between, else scrolling. Without shell tabs there is nothing to
+    /// give scrolling room to, so the two pinned ends need only fit.
+    ///
+    /// Neither width depends on the layout, which is what keeps the layout from flipping back: the main tab is the
+    /// same button wherever it sits, and the strip's content is the same items and gaps in either layout (the pinned
+    /// layout's scrolling part takes its leading gap only when it has a shell tab, [`TerminalSet::strip`]), so the top
+    /// row gives the strip the same width either way. A zero strip width is taken for a strip not laid out yet and
+    /// pins; a strip really laid out at zero width (only in a pane narrower than the 650 pixels SPEC.md keeps the row
+    /// whole for, where clipping is allowed) shows no tab either way.
+    fn at(strip: Pixels, agent: Pixels, shell_tabs: bool) -> StripLayout {
+        let tabs_room = if shell_tabs {
+            STRIP_GAP + PINNED_TABS_FLOOR
+        } else {
+            0.
+        };
+        if strip == px(0.) || strip >= agent + px(tabs_room + PINNED_ADD_WIDTH) {
+            StripLayout::Pinned
+        } else {
+            StripLayout::Scrolling
+        }
+    }
+
+    /// How many of the scrolling part's items come before the first shell tab's: the main tab's, when it scrolls too.
+    /// Shell tab `n` is the scrolling part's item `n` plus this.
+    fn first_tab_item(self) -> usize {
+        match self {
+            StripLayout::Pinned => 0,
+            StripLayout::Scrolling => 1,
+        }
+    }
+}
+
+/// Where the request to scroll the chosen tab into view stands ([`TerminalSet::reveal_chosen`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChosenReveal {
+    /// Nothing to do: the last request was spent (or dropped because keyboard focus reached a strip control in the
+    /// same frame), so the wheel is free to move the strip.
+    Done,
+    /// A choice was made (even one that kept the tab shown) or restored; the strip's next draw scrolls to it. Whoever
+    /// arms it also notifies, so that draw comes.
+    Wanted,
+    /// Asked for in a frame that then moved the scrolling part's viewport (a strip drawn for the first time, a change
+    /// of layout, a change of width): GPUI places a reveal against the viewport where the frame before put it, so that
+    /// reveal may have landed for a viewport no longer there. Or the strip is about to change layout, which moves its
+    /// tabs whether or not a reveal was asked for. The strip's layout check sets it and asks for the next frame itself,
+    /// which asks once more, against the viewport this frame left; it repeats only while each frame moves the viewport
+    /// again or changes layout ([`TerminalSet::strip`]).
+    Again,
 }
 
 /// The close question's first line (the old app's `CLOSE_TAB_CONSEQUENCE`): closing asks whatever the shell runs,
@@ -400,14 +486,16 @@ struct Tab {
 /// differently (the item's start, or the × a few pixels into it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StripControl {
-    /// The Agent tab, the strip's first item.
+    /// The Agent tab: pinned before the scrolling part, where focus reaching it scrolls nothing, or, in a strip too
+    /// narrow to pin it ([`StripLayout::Scrolling`]), the scrolling part's first item.
     Agent,
-    /// Shell tab `n`'s button, the item that holds it and its × (item `n + 1`).
+    /// Shell tab `n`'s button, the item that holds it and its × (item `n`, after the main tab's when that scrolls too:
+    /// [`StripLayout::first_tab_item`]).
     Tab(usize),
     /// Shell tab `n`'s ×, over the start of that same item.
     Close(usize),
-    /// New terminal: pinned after the scrolling tabs, where focus reaching it scrolls nothing, or, in a strip too
-    /// narrow to pin it ([`TerminalSet::pins_add`]), the scrolling part's last item, after the divider.
+    /// New terminal: pinned after the scrolling part, where focus reaching it scrolls nothing, or, in a strip too
+    /// narrow to pin it, the scrolling part's last item, after the divider.
     Add,
 }
 
@@ -418,6 +506,16 @@ enum StripControl {
 struct ShownTerminals(HashMap<String, String>);
 
 impl Global for ShownTerminals {}
+
+/// Remember shell tab `id` as session `key`'s shown one, as a choice in an earlier view would, so the session's next
+/// view restores it. For tests outside this module that need a fresh pane to open on a remembered tab, where choosing
+/// it in an earlier view would draw that view's strip first.
+#[cfg(test)]
+pub(crate) fn remember_shown(key: &str, id: &str, cx: &mut App) {
+    cx.default_global::<ShownTerminals>()
+        .0
+        .insert(key.to_owned(), id.to_owned());
+}
 
 /// Which boundary an automatic restore is waiting for. Carried upload notices wait too so they go to the final
 /// visible terminal, or to the notice center if the user leaves while the restore is pending.
@@ -463,13 +561,27 @@ pub struct TerminalSet {
     /// the strip is built while the header draws, from a shared reference, and asking the scroll handle to reveal a
     /// control then is how GPUI expects it (the handle acts on it when it lays the strip out).
     scroll: ScrollHandle,
-    /// The control last scrolled into view (see `scroll`), and for New terminal whether it was pinned then
-    /// ([`TerminalSet::pins_add`]), since it needs revealing again when it moves into the scrolling part.
-    revealed: Cell<Option<(StripControl, bool)>>,
-    /// The whole strip's bounds as last laid out, tabs and New terminal together: the width the top row gave the strip,
-    /// which does not depend on where New terminal sits in it, so deciding from it cannot flip the choice back
-    /// ([`TerminalSet::pins_add`]). Its scroll position is never used.
+    /// The control last scrolled into view (see `scroll`), and the strip's layout then: a control is revealed again
+    /// when the layout changes under focus, since that moves it (the main tab and New terminal between a pinned end and
+    /// the scrolling part, a shell tab by the main tab's width), as when a tunnel pill narrows the strip. Cleared by the
+    /// strip's layout check when the frame that revealed a control moved the viewport the reveal was placed against,
+    /// so the next frame reveals it again ([`TerminalSet::strip`]).
+    revealed: Cell<Option<(StripControl, StripLayout)>>,
+    /// The layout the strip was last built in, which is the layout of the item bounds `scroll` holds until the next
+    /// frame is laid out: [`TerminalSet::reveal_close`] reads those bounds directly, so it numbers the items by this,
+    /// not by the layout the next frame will take ([`TerminalSet::layout`]). `None` before the first draw.
+    drawn_layout: Cell<Option<StripLayout>>,
+    /// Whether the chosen tab still needs scrolling into view ([`TerminalSet::reveal_chosen`]): armed wherever the
+    /// choice changes, spent by the strip's next draw. A `Cell` for the same reason as `revealed`, and so the strip's
+    /// layout check, which runs while the frame is prepared, can ask once more.
+    chosen_reveal: Cell<ChosenReveal>,
+    /// The whole strip's bounds as last laid out, every control together: the width the top row gave the strip, which
+    /// does not depend on the strip's layout, so deciding from it cannot flip the choice back ([`StripLayout::at`]).
+    /// Its scroll position is never used.
     strip_bounds: ScrollHandle,
+    /// The main tab's bounds as last laid out, through the box around it ([`AGENT_SLOT_ID`]): its width is part of what
+    /// pinning it costs ([`StripLayout::at`]), and is the same wherever it sits. Its scroll position is never used.
+    agent_bounds: ScrollHandle,
     /// Whether the terminals are inert ([`TerminalSet::set_inert`]), which new tabs take on too.
     inert: bool,
     /// The tab whose close question was asked last, by id, and the question's layer: while that layer is open, the
@@ -526,7 +638,10 @@ impl TerminalSet {
             add_focus: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
             revealed: Cell::new(None),
+            drawn_layout: Cell::new(None),
+            chosen_reveal: Cell::new(ChosenReveal::Done),
             strip_bounds: ScrollHandle::new(),
+            agent_bounds: ScrollHandle::new(),
             inert: false,
             asking: None,
             close_anchors: RefCell::new(HashMap::new()),
@@ -658,9 +773,10 @@ impl TerminalSet {
         {
             return;
         }
-        if self.set_choice(id, cx) {
-            cx.notify();
-        }
+        // Notified even when the choice stays: the reveal it armed needs a draw of the strip, and a press that moves no
+        // focus (one already on the tab, or a macOS click, which leaves a button unfocused) would cause none.
+        self.set_choice(id, cx);
+        cx.notify();
         self.take_carried(cx);
         match self.home(cx) {
             Some(home) => focus::choose_terminal(&home, mark, window, cx),
@@ -668,8 +784,9 @@ impl TerminalSet {
         }
     }
 
-    /// Cycle the main terminal and the shell tabs with mounted terminals. Confirmed closes and tabs beyond the attach
-    /// limit can still occupy painted positions, so keep the original strip index when scrolling to the choice.
+    /// Cycle the main terminal and the shell tabs with mounted terminals. The choice brings its tab into view as every
+    /// choice does ([`Self::reveal_chosen`]), by its place in the strip, which still counts confirmed closes and tabs
+    /// beyond the attach limit.
     pub(crate) fn step(
         &mut self,
         direction: TabStep,
@@ -680,36 +797,36 @@ impl TerminalSet {
         if self.inert || self.shown().is_none() {
             return;
         }
-        let mut live = vec![(0, None)];
+        let mut live = vec![None];
         live.extend(
             self.tabs
                 .iter()
-                .enumerate()
-                .filter(|(_, tab)| {
-                    tab.terminal.is_some() && !self.confirmed_closed.contains(&tab.id)
-                })
-                .map(|(index, tab)| (index + 1, Some(tab.id.as_str()))),
+                .filter(|tab| tab.terminal.is_some() && !self.confirmed_closed.contains(&tab.id))
+                .map(|tab| Some(tab.id.as_str())),
         );
         if live.len() == 1 {
             return;
         }
         let current = live
             .iter()
-            .position(|&(_, id)| id == self.chosen.as_deref())
+            .position(|&id| id == self.chosen.as_deref())
             .unwrap_or(0);
         let target = match direction {
             TabStep::Previous => (current + live.len() - 1) % live.len(),
             TabStep::Next => (current + 1) % live.len(),
         };
-        let (strip_index, id) = live[target];
-        self.choose(id.map(str::to_owned), mark, window, cx);
-        self.scroll.scroll_to_item(strip_index);
+        let id = live[target].map(str::to_owned);
+        self.choose(id, mark, window, cx);
     }
 
     /// A deliberate choice or close fallback replaces the restore target and
     /// its saved selection together. Initial-attach refusals use their own path.
-    fn set_choice(&mut self, id: Option<String>, cx: &mut Context<Self>) -> bool {
+    /// Either way the chosen tab is scrolled into view at the strip's next draw ([`Self::reveal_chosen`]), even when the
+    /// choice did not change: a press on a tab half scrolled out shows it whole. The caller notifies, which brings that
+    /// draw.
+    fn set_choice(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         self.restore = None;
+        self.chosen_reveal.set(ChosenReveal::Wanted);
         let shown = cx.default_global::<ShownTerminals>();
         match &id {
             Some(id) => {
@@ -719,9 +836,7 @@ impl TerminalSet {
                 shown.0.remove(&self.key);
             }
         }
-        let changed = self.chosen != id;
         self.chosen = id;
-        changed
     }
 
     /// Return the nearest earlier tab in the old strip that still appears in the roster and has no confirmed close.
@@ -850,6 +965,8 @@ impl TerminalSet {
                 })
                 .cloned();
             self.restore = self.chosen.clone().map(Restore::Attaching);
+            // Restoring is a choice the user made in an earlier view, and its tab may sit far out of the new strip.
+            self.chosen_reveal.set(ChosenReveal::Wanted);
         }
         // One push can remove the restoring tab and list the tab New requested. Let the deferred choice
         // settle before delivering notices, so they reach the terminal the user will see after this push.
@@ -882,7 +999,10 @@ impl TerminalSet {
         }
         match terminal.read(cx).initial_tab_attach() {
             InitialTabAttach::Pending => return,
-            InitialTabAttach::Refused => self.chosen = None,
+            InitialTabAttach::Refused => {
+                self.chosen = None;
+                self.chosen_reveal.set(ChosenReveal::Wanted);
+            }
             InitialTabAttach::Settled => {}
         }
         self.restore = None;
@@ -924,21 +1044,22 @@ impl TerminalSet {
         }
     }
 
-    /// The strip for the top row's left region: the agent terminal's tab, then one per shell tab, each choosing its
-    /// terminal and with its × over the leading slot at its left, in a part that scrolls sideways when it runs out of
-    /// room, then a divider and New terminal pinned at the strip's right end (SPEC.md: "only the tab strip takes the
-    /// remaining width, and its tabs scroll horizontally when needed"). A strip too narrow to pin New terminal puts the
-    /// divider and New terminal at the end of the scrolling part instead ([`TerminalSet::pins_add`]).
+    /// The strip for the top row's left region: the agent terminal's tab pinned at the strip's left end, then one tab
+    /// per shell tab, each choosing its terminal and with its × over the leading slot at its left, in a part that
+    /// scrolls sideways when it runs out of room, then a divider and New terminal pinned at the strip's right end
+    /// (SPEC.md: "only the tab strip takes the remaining width, and its tabs scroll horizontally when needed"). A strip
+    /// too narrow to pin both ends puts them in the scrolling part instead ([`StripLayout`]).
     ///
     /// The strip and its scrolling part grow into free width but keep an automatic basis, their content's width, so
     /// that beside a tunnel pill a short row takes width from the strip and the pill in proportion to their content, as
     /// the old app's `.tab-strip { flex: 0 1 auto }` did, down to the strip's floor (`session_pane::header`'s fit). That
-    /// content width is the same whether New terminal is pinned or not (the same items and gaps either way), so the
-    /// strip's width, which decides the pin, does not depend on the pin.
+    /// content width is the same in either layout (the same items and gaps either way), so the strip's width, which
+    /// decides the layout, does not depend on the layout.
     ///
     /// Each tab is a button reporting whether its terminal is the one shown (pressed), as the old strip's were, not a
     /// tab list, which could not hold the close buttons beside them. A tab, ×, or New terminal that keyboard focus
-    /// reaches while scrolled out of view is scrolled into it ([`TerminalSet::reveal_focused`]).
+    /// reaches while scrolled out of view is scrolled into it ([`TerminalSet::reveal_focused`]), and so is the chosen
+    /// tab once each time the choice changes ([`TerminalSet::reveal_chosen`]).
     ///
     /// A shell tab's × shows, in place of its terminal mark, while the pointer is over the tab's box (not while the set
     /// is inert), keyboard focus is on the tab or its ×, its close question is open ([`TerminalSet::asking`]), or its
@@ -965,7 +1086,18 @@ impl TerminalSet {
         let chosen = this.chosen.clone();
         let inert = this.inert;
         let asking = this.asking.clone();
-        this.reveal_focused(window);
+        let layout = this.layout();
+        let shell_tabs = !this.tabs.is_empty();
+        // The scroll handle's item bounds are still the last frame's, laid out in the layout that frame was built in.
+        let last_drawn = this.drawn_layout.replace(Some(layout));
+        let last_layout = last_drawn.unwrap_or(layout);
+        // Focus first: a control the keyboard just reached is where the user is looking, so a choice made in the same
+        // frame does not scroll it back out ([`Self::reveal_chosen`]).
+        let focus_revealed = this.reveal_focused(window, layout, last_layout);
+        let chosen_requested = this.reveal_chosen(layout, focus_revealed, last_drawn.is_some());
+        // Any reveal asked for above is placed against this viewport, where the last frame put the scrolling part; the
+        // layout check below compares it with where this frame puts it.
+        let placed_against = this.scroll.bounds();
         let mut close_anchors = HashMap::new();
         let listed: Vec<(String, FocusHandle, FocusHandle)> = this
             .tabs
@@ -976,8 +1108,9 @@ impl TerminalSet {
         let add_focus = this.add_focus.clone();
         let scroll = this.scroll.clone();
         let strip_bounds = this.strip_bounds.clone();
-        let pins_add = this.pins_add();
-        let strip_bounds_now = strip_bounds.clone();
+        let agent_bounds = this.agent_bounds.clone();
+        let (strip_bounds_now, agent_bounds_now) = (strip_bounds.clone(), agent_bounds.clone());
+        let scroll_now = scroll.clone();
         let palette = theme::palette(cx);
         // `revealed` is `None` for the Agent tab, which has no leading slot, and otherwise whether a shell tab's ×
         // shows over its slot now.
@@ -1028,14 +1161,25 @@ impl TerminalSet {
         } else {
             ("Agent", "Agent: show the session's agent terminal")
         };
-        let mut items = vec![tab(
-            AGENT_TAB_ID.to_owned(),
-            main_label.to_owned(),
-            main_help.to_owned(),
-            None,
-            &agent_focus,
-            None,
-        )];
+        // The box records the main tab's width wherever it sits, for the next frame's layout ([`StripLayout::at`]).
+        let main_tab = div()
+            .id(AGENT_SLOT_ID)
+            .flex_none()
+            .track_scroll(&agent_bounds)
+            .child(tab(
+                AGENT_TAB_ID.to_owned(),
+                main_label.to_owned(),
+                main_help.to_owned(),
+                None,
+                &agent_focus,
+                None,
+            ))
+            .into_any_element();
+        // The scrolling part's items: the shell tabs, after the main tab when it scrolls too.
+        let (mut items, pinned_main) = match layout {
+            StripLayout::Pinned => (Vec::new(), Some(main_tab)),
+            StripLayout::Scrolling => (vec![main_tab], None),
+        };
         for (index, (id, focus, close_focus)) in listed.into_iter().enumerate() {
             let label = tab_label(index);
             let closing = closing(&key, &id, cx);
@@ -1165,16 +1309,16 @@ impl TerminalSet {
                 TerminalSet::open_tab(&set, mark, handle, cx);
             })
         };
-        // The tabs scroll in a part of their own that takes the strip's free width, and the divider and New terminal
-        // come after it, outside it: New terminal stays at the tab area's right end however many tabs are open, and in
-        // view while the tabs scroll. A new tab therefore never takes New terminal's place under the pointer, where a
-        // second press would land on the new tab's × (the plan's 2026-11-27 decision; SPEC.md, "Session view").
-        // A strip too narrow to pin it keeps New terminal at the end of the scrolling tabs ([`Self::pins_add`]).
+        // The shell tabs scroll in a part of their own that takes the strip's free width, and the divider and New
+        // terminal come after it, outside it: New terminal stays at the tab area's right end however many tabs are
+        // open, and in view while the tabs scroll. A new tab therefore never takes New terminal's place under the
+        // pointer, where a second press would land on the new tab's × (the plan's 2026-11-27 decision; SPEC.md,
+        // "Session view"). The main tab sits before that part, outside it too, so it stays one press away however far
+        // the shell tabs scroll. A strip too narrow to pin both keeps them in the scrolling part ([`StripLayout`]).
         let mut pinned_add = Vec::new();
-        let end = if pins_add {
-            &mut pinned_add
-        } else {
-            &mut items
+        let end = match layout {
+            StripLayout::Pinned => &mut pinned_add,
+            StripLayout::Scrolling => &mut items,
         };
         end.push(divider.into_any_element());
         end.push(add.into_any_element());
@@ -1187,19 +1331,77 @@ impl TerminalSet {
             .gap(px(STRIP_GAP))
             .flex_auto()
             .min_w_0()
+            // The gap after the pinned main tab belongs to the first shell tab: a scrolling part with nothing in it
+            // takes none, so the strip's content is the same width in either layout ([`StripLayout::at`]).
+            .when(pinned_main.is_some() && shell_tabs, |tabs| {
+                tabs.ml(px(STRIP_GAP))
+            })
             .overflow_x_scroll()
             .track_scroll(&scroll)
             .children(items);
+        // The pinned main tab and the scrolling part share a box that takes the strip's free width, as the scrolling
+        // part does on its own in the narrow layout, so New terminal stays at the strip's right end and the shell tabs
+        // get the room between.
+        let lead = match pinned_main {
+            Some(main_tab) => div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .flex_auto()
+                .min_w_0()
+                .child(main_tab)
+                .child(tabs)
+                .into_any_element(),
+            None => tabs.into_any_element(),
+        };
+        let weak = set.downgrade();
         let strip = div()
             .on_children_prepainted(move |_, window, cx| {
-                // The choice was made from the last frame's width, and this frame's is known only now (`track_scroll`
-                // records it before the children are prepainted). When the strip changed size across the threshold
-                // (a tunnel pill appearing beside it in a narrow pane, say), draw again with the new choice rather
-                // than wait for something else to redraw the row: a pinned New terminal in a strip too narrow for it
-                // leaves the tabs no room at all. The strip's own width does not depend on the choice, so the second
-                // frame settles it. The redraw is deferred to after this frame, since one asked for while the frame
-                // is prepared is dropped (as `hosts::progress::card`'s tracker notes).
-                if pins_add_at(strip_bounds_now.bounds().size.width) != pins_add {
+                // The layout was chosen from the last frame's widths, and this frame's are known only now
+                // (`track_scroll` records each box's before its children are prepainted, and the main tab's box is a
+                // child). When they cross a tier's threshold (a tunnel pill appearing beside the strip in a narrow
+                // pane, say), draw again with the new layout rather than wait for something else to redraw the row: a
+                // pinned end in a strip too narrow for it leaves the shell tabs no room at all. Neither width depends
+                // on the layout, so the second frame settles it.
+                //
+                // A reveal asked for in this frame, of the chosen tab or of a control focus reached, was placed
+                // against the viewport the last frame left (`placed_against`), and is right only if this frame left
+                // the scrolling part where that one did. When it did not (the strip's first frame, a change of layout,
+                // a pill narrowing the strip), the reveal is asked for again in the next frame, which places it
+                // against this frame's viewport. Only the sideways extent counts, since the reveal is sideways. A
+                // frame that moves nothing asks nothing more, so this repeats only while the viewport keeps moving,
+                // and the wheel is free once it stops.
+                //
+                // When the next frame takes the other layout, the chosen tab is revealed again there whether or not
+                // this frame asked, as a focused control is (`revealed` is keyed by the layout): a strip narrowing
+                // into the scrolling layout (a tunnel pill appearing a few frames after a pane opens, say) keeps the
+                // offset it had, which in so narrow a strip leaves the tab just revealed past its end.
+                //
+                // The redraw is deferred to after this frame, since one asked for while the frame is prepared is
+                // dropped (as `hosts::progress::card`'s tracker notes).
+                let now = StripLayout::at(
+                    strip_bounds_now.bounds().size.width,
+                    agent_bounds_now.bounds().size.width,
+                    shell_tabs,
+                );
+                let changed = now != layout;
+                let viewport = scroll_now.bounds();
+                let moved = viewport.left() != placed_against.left()
+                    || viewport.right() != placed_against.right();
+                let again = weak.upgrade().is_some_and(|set| {
+                    let set = set.read(cx);
+                    // A focused control is keyed by the layout too, so a change of layout reveals it again anyway.
+                    let focus_again = focus_revealed && moved;
+                    if focus_again {
+                        set.revealed.set(None);
+                    }
+                    let reveal = &set.chosen_reveal;
+                    if changed || (moved && chosen_requested) {
+                        reveal.set(ChosenReveal::Again);
+                    }
+                    focus_again || reveal.get() == ChosenReveal::Again
+                });
+                if changed || again {
                     window.defer(cx, |window, _| window.refresh());
                 }
             })
@@ -1216,7 +1418,7 @@ impl TerminalSet {
             .overflow_x_hidden()
             .track_scroll(&strip_bounds)
             .when(inert, |strip| strip.opacity(INERT_OPACITY))
-            .child(tabs)
+            .child(lead)
             .children(pinned_add);
         strip.into_any_element()
     }
@@ -1226,12 +1428,22 @@ impl TerminalSet {
     /// strip's visible part, which happens readily beside a tunnel pill, where the top row may leave the strip only a
     /// few pixels (`session_pane::header`'s fit).
     ///
-    /// The scrolling part's items are the Agent tab, then one item per shell tab holding its button and its ×, which
-    /// [`StripControl`] maps focus onto; New terminal sits after that part, always in view, unless the strip is too
-    /// narrow to pin it ([`Self::pins_add`]), when it is the part's last item, after the divider. A tab and an unpinned
-    /// New terminal are scrolled to as items, which shows an item wider than the strip from its start; a × is revealed
-    /// by [`Self::reveal_close`]. Focus moving from a tab to its own × still counts as reaching a new control.
-    fn reveal_focused(&self, window: &Window) {
+    /// The scrolling part's items are one per shell tab holding its button and its ×, which [`StripControl`] maps focus
+    /// onto; the main tab sits before that part and New terminal after it, always in view, unless the strip is too
+    /// narrow to pin them (`layout` [`StripLayout::Scrolling`]), when they are the part's first and last items, New
+    /// terminal after the divider. A tab and an unpinned main tab or New terminal are scrolled to as items, which shows
+    /// an item wider than the strip from its start; a × is revealed by [`Self::reveal_close`], from the item bounds the
+    /// last frame left, which are numbered in that frame's layout, `last_layout`. Focus moving from a tab to its own ×
+    /// still counts as reaching a new control. Returns whether it handled a newly focused control in the scrolling part
+    /// (even one already in view), which a reveal of the chosen tab in the same frame then yields to
+    /// ([`Self::reveal_chosen`]), and which the strip's layout check asks for again when the frame moves the viewport
+    /// under it ([`Self::strip`]).
+    fn reveal_focused(
+        &self,
+        window: &Window,
+        layout: StripLayout,
+        last_layout: StripLayout,
+    ) -> bool {
         let focused = if self.agent_focus.is_focused(window) {
             Some(StripControl::Agent)
         } else if self.add_focus.is_focused(window) {
@@ -1247,35 +1459,85 @@ impl TerminalSet {
                 }
             })
         };
-        // New terminal moves between the pinned end and the scrolling part when the strip's width crosses
-        // `pins_add`'s threshold, so it counts as a new control to reveal when that happens under focus, as when a
-        // tunnel pill narrows the strip while New terminal holds focus.
-        let focused =
-            focused.map(|control| (control, control == StripControl::Add && self.pins_add()));
-        if focused != self.revealed.get() {
-            match focused.map(|(control, _)| control) {
-                Some(StripControl::Agent) => self.scroll.scroll_to_item(0),
-                Some(StripControl::Tab(n)) => self.scroll.scroll_to_item(n + 1),
-                Some(StripControl::Close(n)) => self.reveal_close(n + 1),
-                // Pinned outside the scrolling part, so always in view; otherwise after the shell tabs and the divider.
-                Some(StripControl::Add) if self.pins_add() => {}
-                Some(StripControl::Add) => self.scroll.scroll_to_item(self.tabs.len() + 2),
-                None => {}
-            }
-            self.revealed.set(focused);
+        // Every control moves when the layout changes under focus (the ends between pinned and scrolling, a shell tab
+        // by the main tab's width), so it counts as a new control to reveal then, as when a tunnel pill narrows the
+        // strip while New terminal holds focus.
+        let focused = focused.map(|control| (control, layout));
+        if focused == self.revealed.get() {
+            return false;
         }
+        self.revealed.set(focused);
+        let first = layout.first_tab_item();
+        let pinned = layout == StripLayout::Pinned;
+        match focused.map(|(control, _)| control) {
+            // Pinned outside the scrolling part, so always in view; otherwise its first item.
+            Some(StripControl::Agent) if pinned => return false,
+            Some(StripControl::Agent) => self.scroll.scroll_to_item(0),
+            Some(StripControl::Tab(n)) => self.scroll.scroll_to_item(n + first),
+            Some(StripControl::Close(n)) => self.reveal_close(n, last_layout, layout),
+            // Pinned outside the scrolling part, so always in view; otherwise after the shell tabs and the divider.
+            Some(StripControl::Add) if pinned => return false,
+            Some(StripControl::Add) => self.scroll.scroll_to_item(self.tabs.len() + first + 1),
+            None => return false,
+        }
+        true
     }
 
-    /// Whether New terminal is pinned at the strip's end, outside the scrolling tabs: unless the strip, as last laid
-    /// out, is narrower than New terminal and a control's worth of tabs ([`PINNED_TABS_FLOOR`]). Pinned, adding a tab
-    /// never moves New terminal, so a second press where it was lands on it again rather than on the new tab's × (the
-    /// plan's 2026-11-27 decision). A strip that narrow appears only beside a tunnel pill in the narrowest pane the top
-    /// row supports, where a pinned New terminal would leave the tabs less than a control's width; there it goes back to
-    /// the end of the scrolling tabs, so every control can still be scrolled into view when focused. Before the strip's
-    /// first layout its width is unknown, and it is pinned. The strip corrects a choice its new width overturns in the
-    /// next frame ([`TerminalSet::strip`]).
-    fn pins_add(&self) -> bool {
-        pins_add_at(self.strip_bounds.bounds().size.width)
+    /// Ask the strip to scroll the chosen tab into view if the choice changed since it last did (`chosen_reveal`), for
+    /// the strip being drawn now in `layout`, and report whether it asked. Wherever the choice changes it arms the
+    /// request, and this spends it, so the chosen tab is brought into view once per choice and the wheel then moves the
+    /// strip freely; SPEC.md, "Session view", has the shortcuts bring their tab into view, and the same holds for a
+    /// press, New terminal, a close's fallback and a restore. Choosing by a press never needs it for the tab pressed,
+    /// which was in view to be pressed (unless half scrolled out), but the request is the same for every way of
+    /// choosing, so there is one path to get right. A control keyboard focus reached in the same frame
+    /// (`focus_revealed`) takes precedence: the request is dropped rather than scroll focus out of view.
+    ///
+    /// The main tab needs nothing while it is pinned. Otherwise the request is GPUI's own reveal of an item
+    /// ([`ScrollHandle::scroll_to_item`]), which it resolves while laying out the scrolling part, against this frame's
+    /// items but the viewport where the last frame put it. So a tab drawn in this frame for the first time (New
+    /// terminal's) is revealed on the frame it first appears, whenever that frame leaves the viewport where it was.
+    /// When the frame moves the viewport, the strip's layout check has the next frame ask again; and whenever the next
+    /// frame takes the other layout, it asks there even if the choice was revealed long before, since the strip itself
+    /// moved its tabs ([`ChosenReveal::Again`], [`Self::strip`]). A strip drawn for the first time
+    /// (`drawn_before` false) has no viewport yet, and a reveal GPUI met there would be spent doing nothing, so that
+    /// frame only asks for the next.
+    fn reveal_chosen(&self, layout: StripLayout, focus_revealed: bool, drawn_before: bool) -> bool {
+        let state = self.chosen_reveal.replace(ChosenReveal::Done);
+        if state == ChosenReveal::Done || focus_revealed {
+            return false;
+        }
+        let index = match &self.chosen {
+            None => (layout == StripLayout::Scrolling).then_some(0),
+            Some(id) => self
+                .tabs
+                .iter()
+                .position(|tab| &tab.id == id)
+                .map(|n| n + layout.first_tab_item()),
+        };
+        let Some(index) = index else {
+            return false;
+        };
+        if drawn_before {
+            self.scroll.scroll_to_item(index);
+        } else {
+            self.chosen_reveal.set(ChosenReveal::Again);
+        }
+        true
+    }
+
+    /// The strip's layout for its next draw, from its and its main tab's widths as last laid out ([`StripLayout::at`]).
+    /// Pinned, adding a tab never moves New terminal, so a second press where it was lands on it again rather than on
+    /// the new tab's × (the plan's 2026-11-27 decision), and the main tab stays in view however far the shell tabs
+    /// scroll. A strip too narrow for that appears only beside a tunnel pill in the narrowest panes the top row
+    /// supports; there everything scrolls, so every control can still be scrolled into view when focused. Before the
+    /// strip's first layout its width is unknown, and it is pinned. The strip corrects a layout its new widths overturn
+    /// in the next frame ([`TerminalSet::strip`]).
+    fn layout(&self) -> StripLayout {
+        StripLayout::at(
+            self.strip_bounds.bounds().size.width,
+            self.agent_bounds.bounds().size.width,
+            !self.tabs.is_empty(),
+        )
     }
 
     /// Scroll the strip so the × of the shell tab in its item `index` shows, with room for its focus ring, moving it
@@ -1285,10 +1547,15 @@ impl TerminalSet {
     /// pill the top row may leave the strip only a few pixels (`session_pane::header`'s fit). Scrolling to the item
     /// would not do: an item wider than the strip shows from its start, and the × sits [`CLOSE_LEFT`] pixels into it.
     /// The item's place comes from the frame the strip was last drawn in (the scroll handle keeps it, placed as if
-    /// unscrolled), so an item not drawn yet is scrolled to as usual.
-    fn reveal_close(&self, index: usize) {
-        let Some(item) = self.scroll.bounds_for_item(index) else {
-            self.scroll.scroll_to_item(index);
+    /// unscrolled), so it is shell tab `tab`'s item in that frame's layout, `last_layout`, which differs from the next
+    /// frame's (`layout`) in the frame after a change of tier; an item not drawn yet is scrolled to as usual, as the
+    /// next frame numbers it.
+    fn reveal_close(&self, tab: usize, last_layout: StripLayout, layout: StripLayout) {
+        let Some(item) = self
+            .scroll
+            .bounds_for_item(tab + last_layout.first_tab_item())
+        else {
+            self.scroll.scroll_to_item(tab + layout.first_tab_item());
             return;
         };
         let viewport = self.scroll.bounds();
@@ -1399,8 +1666,10 @@ impl TerminalSet {
             // Not drawn yet: there is nothing to hang a question from. The next press finds it.
             return true;
         };
-        // Item 0 is the Agent tab; shell tab `index` is item `index + 1` ([`StripControl`]).
-        this.reveal_close(index + 1);
+        // The scroll handle's bounds are the last drawn frame's, numbered in its layout; the next frame's layout, from
+        // the widths that frame measured, can differ for one frame after the strip's width crosses a tier.
+        let layout = this.layout();
+        this.reveal_close(index, this.drawn_layout.get().unwrap_or(layout), layout);
         ask_to_close(set, &id, &tab_label(index), &anchor, window, cx);
         true
     }
