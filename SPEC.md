@@ -2916,25 +2916,30 @@ alert, and an off-by-default **Agent is blocked** switch chooses the alert an ag
 Under them, **Grace period** (Off, 5 s, 10 s, 30 s, 1 min, 2 min; default 10 s) sets how long each alert waits for the
 user to attend to its session first (see Status); a value saved some other way, up to 10 minutes, is offered as well.
 The two cards are one form with one Save. The form also has a server URL (default `https://ntfy.sh`), a topic, an
-optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). The waiting switch says which
-agents it covers, worded from what Farhelm can read on each built-in agent's screen: questions and approvals for some,
-only the folder-trust question for others, none for the rest. These ntfy settings are explicitly saved helm
-configuration, shared by every client, outside the preference row. Save refusals appear inline. The stored token is
-never returned: the form shows whether one exists and allows replacing or clearing it. Changing to another server clears
-a saved token unless a new one is entered, and the form says so before saving. **Send test** uses the saved
-configuration, even while disabled, and reports success or failure inline. Because a test that arrives proves only the
-server and topic, a line beside it says when the form has unsaved changes (alerts and the test still use the saved
-settings), when the saved master switch is off, or when the saved waiting and blocked switches are both off. The
-**Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a monospace multi-line
-post-clone command field and the default-on **Keep a checkout ready for faster launches** switch (see
-[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
-host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
-after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
-first-use folder creation, and that the default applies to hosts without their own folder, set in each host's settings.
-The command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts,
-that changes affect future checkouts only, and that command-line host overrides keep their command. When the updater is
-active, the desktop app's dialog also has an **App** section. It shows the running version and a **Check for updates**
-button above the switch for installing updates automatically (see
+optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). Below them, an off-by-default
+**Quiet hours** switch has a start and an end hour (00:00 to 23:00 in the local time of the machine the helm runs on,
+from the start up to the end, which may run past midnight; default 22:00 to 07:00) and a **Quiet hours priority** (Off,
+Min, Low, Default, High, Urgent; default Low) that alerts get during those hours (see Status). Save refuses a start
+equal to the end. Settings saved before quiet hours existed read as off. The waiting switch says which agents it covers,
+worded from what Farhelm can read on each built-in agent's screen: questions and approvals for some, only the
+folder-trust question for others, none for the rest. These ntfy settings are explicitly saved helm configuration, shared
+by every client, outside the preference row. Save refusals appear inline. The stored token is never returned: the form
+shows whether one exists and allows replacing or clearing it. Changing to another server clears a saved token unless a
+new one is entered, and the form says so before saving. **Send test** uses the saved configuration, even while disabled,
+and reports success or failure inline. It goes at the priority alerts would have now and says which; during quiet hours
+it says they chose that priority, and when they are set to Off it still sends, at the saved priority, and says that real
+alerts are silenced. Because a test that arrives proves only the server and topic, a line beside it says when the form
+has unsaved changes (alerts and the test still use the saved settings), when the saved master switch is off, or when the
+saved waiting and blocked switches are both off. The **Checkouts** section holds the explicitly saved **Default checkout
+folder** and, below it, a monospace multi-line post-clone command field and the default-on **Keep a checkout ready for
+faster launches** switch (see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's
+disk space per repository and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and
+discard on the next create or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains
+expansion on each host, first-use folder creation, and that the default applies to hosts without their own folder, set
+in each host's settings. The command's help explains that it runs in each new checkout on its host, after cloning and
+before the agent starts, that changes affect future checkouts only, and that command-line host overrides keep their
+command. When the updater is active, the desktop app's dialog also has an **App** section. It shows the running version
+and a **Check for updates** button above the switch for installing updates automatically (see
 [Installation and updates](#installation-and-updates)). Automatic updates are a setting of that app installation. On an
 installed stable Mac release, App also offers **Show what's new after updates**, on by default. The helm shares that
 choice and the last shown or skipped release with the window. The two host confirmation choices apply to every host and
@@ -3498,13 +3503,15 @@ after the wait began, and the rate cap below applies when an alert is sent.
 The alert contains the session's title and the host's display name, with control and other invisible or reordering
 characters removed and each capped at 200 characters: "<title> on <host> is waiting for you". A title generated from a
 directory is still sent as the title; no screen contents, prompts, command lines or other paths are added. Its ntfy
-title is Farhelm and its urgency is the saved priority. At most five background sends are attempted per minute across
-all hosts. Excess alerts and full-queue alerts are dropped; the next permitted alert can mention the number dropped by
-the rate cap, but there is no later summary alert. Failed sends are logged without the topic, token or title and
-dropped, never retried. Sending does not hold up host refreshes or terminal interaction. **Send test** bypasses these
-background limits and waits for one send under the short timeout. Anyone who knows an ntfy.sh topic can read it; keep
-the topic private. The desktop app's helm stops when its window closes, so alerts need that window open, though it can
-be in the background.
+title is Farhelm and its urgency is the saved priority, except during quiet hours, judged by the helm machine's local
+time when the alert is sent (after its grace period): the alert then goes at the quiet hours priority, or, with that set
+to Off, is not sent and does not count against the rate cap. At most five background sends are attempted per minute
+across all hosts. Excess alerts and full-queue alerts are dropped; the next permitted alert can mention the number
+dropped by the rate cap, but there is no later summary alert. Failed sends are logged without the topic, token or title
+and dropped, never retried. Sending does not hold up host refreshes or terminal interaction. **Send test** bypasses
+these background limits and waits for one send under the short timeout. Anyone who knows an ntfy.sh topic can read it;
+keep the topic private. The desktop app's helm stops when its window closes, so alerts need that window open, though it
+can be in the background.
 
 When Farhelm loses track of a session's agent conversation in a way that will matter later, most often because Restart
 will then be unable to resume it, it says so on that session as a notification rather than only in a log. The

@@ -418,10 +418,10 @@ linux/settings-muse--dark.png 7487a81cac3a7475bae14cd441c5d3bc8eab9cb1
 linux/settings-muse--light.png 6bde43c1b2584d1375071fb2711559db75119dee
 linux/settings-notifications--dark.png e15f68793efde98027af114d5f99fdc460450dbd
 linux/settings-notifications--light.png ae38749d229351f7351372ff07f7e799523527f2
-linux/settings-notifications-close-refused--dark.png f978fff34d5f47d7b50cbd959b0ace687f3a7b59
-linux/settings-notifications-close-refused--light.png 0a0f5fd7440f5aa5fdd1948e640a1d0140c50cb0
-linux/settings-notifications-edited--dark.png e41f2ea53333b36afd441acd128d27d396772681
-linux/settings-notifications-edited--light.png 025c6f4165fb341764d2724b6f962c6d12faaf0a
+linux/settings-notifications-close-refused--dark.png 43068e34f7886e61a264a61b17754286d29bfad6
+linux/settings-notifications-close-refused--light.png 3b87b056ccefa37542cdba9f8f8ec061c4619112
+linux/settings-notifications-edited--dark.png b25da2a903bb172f198712d5c06d982a26a627cd
+linux/settings-notifications-edited--light.png 6b62fbf4b157702bbac061af66eb6d5ef59bbdc9
 linux/settings-pi--dark.png cae851e758a9c55a05e8c3c9572447932060d551
 linux/settings-pi--light.png 8e4ededf21a717602801bb3314049d370ee946d3
 linux/settings-recipe-editor--dark.png 8ce268966c7f92304387803d8a0323b895001f5d
@@ -462,8 +462,8 @@ linux/settings-terminal-edited--dark.png a8a82e30939f289604fa23b0dd302c046e6b70e
 linux/settings-terminal-edited--light.png 18fe4fc9326d64ecfafd1f12ca547a0317396096
 linux/settings-tunnel-question-over-terminal--dark.png 04c6bf7b3dcdc7856f25ec3f52d0762d3cab1d10
 linux/settings-tunnel-question-over-terminal--light.png 0e74813e503e7b0cdd1683ad2a507b48a0dc3b40
-linux/settings-unsaved--dark.png 678d64106dea7451ec2cbb6bd0f44eb632dc3b8d
-linux/settings-unsaved--light.png 68bb3164c1e5cf83eb47c44834a8b30202954f03
+linux/settings-unsaved--dark.png 708e5a6a59c0fadca93ef286bc2a8828c7142d5c
+linux/settings-unsaved--light.png 12d8086cfb47bcab86bb6d217a3e80ab64707e9e
 linux/solid-button-danger-held--dark.png 90ccd0f77da0946224c592547b42300ea1864c31
 linux/solid-button-danger-held--light.png 054d2c8e6efe21df9bc294995731314ca69a973c
 linux/solid-button-danger-hover--dark.png 35e9d6c249d2d14526cb2c7ae68de42ccf9cca04

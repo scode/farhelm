@@ -62,6 +62,11 @@ waiting in Farhelm's active window. It is also not sent if the session stops wai
 that session counts: Farhelm's window being in front, or the session merely being open, does not. Choose **Off** to
 send alerts without the wait.
 
+Turn on **Quiet hours** to make alerts quieter during hours you choose, at night for example. Alerts sent from the start
+hour up to the end hour go out at the **Quiet hours priority** instead of the usual one, or not at all with **Off**. The
+hours follow the clock of the machine your helm runs on, and the range can run past midnight, such as 22:00 to 07:00.
+**Send test** still sends during quiet hours, and says which priority it used.
+
 Keep Farhelm's window open to receive alerts; it can be in the background. See
 [The pieces](/docs/how-it-works/the-pieces/) for which part keeps running.
 

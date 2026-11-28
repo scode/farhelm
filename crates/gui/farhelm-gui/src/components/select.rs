@@ -13,11 +13,15 @@
 //!   ellipsis.
 //! - **The list** is a menu of the layer manager's, below the control and exactly as wide ([`Anchor::matching_width`]),
 //!   drawn with the shared menu items ([`MenuItem::choice`]); the chosen option carries a tick, as the platform's
-//!   pop-up menu marked it. Opening it moves focus to the chosen option (to the first available one when the chosen one
-//!   cannot be chosen); Up and Down walk the options that can be chosen, as in every menu, and the pointer moves the
-//!   same highlight; Enter, Space or a click chooses and closes; Escape, a press outside or a press on the closed
-//!   control closes without choosing. Closing returns focus to the closed control. GPUI Kit's `Select` is banned (it
-//!   draws its own overlay), so this is the component layer's own.
+//!   pop-up menu marked it. It is never taller than the window's content area allows
+//!   ([`crate::notices_bell::window_cap`], as the session row's menu is) and scrolls what does not fit, keeping the
+//!   focused option in view ([`focus::scroll_region`]): the layer manager only shifts a popover back inside the content
+//!   area, which it can do only for one no taller than the area, and a select with many options (ntfy quiet hours' 24
+//!   hours) would otherwise run past the window's bottom. Opening it moves focus to the chosen option (to the first
+//!   available one when the chosen one cannot be chosen), scrolled into view; Up and Down walk the options that can be
+//!   chosen, as in every menu, and the pointer moves the same highlight; Enter, Space or a click chooses and closes;
+//!   Escape, a press outside or a press on the closed control closes without choosing. Closing returns focus to the
+//!   closed control. GPUI Kit's `Select` is banned (it draws its own overlay), so this is the component layer's own.
 //! - **Keys on the closed control** are WebKit's on macOS, where the old app shipped: Space, Up and Down open the list
 //!   rather than stepping the value, and Alt+Down or Alt+Up (the convention of the other desktops) open it too
 //!   ([`closed_key`]). Enter does not open it: in WebKit a Return on a closed select submitted its form. So Enter goes
@@ -58,9 +62,9 @@ use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, ClickEvent, Context, ElementId, Entity, FocusHandle, InteractiveElement,
-    IntoElement, Keystroke, Modifiers, ParentElement, Render, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
-    svg,
+    IntoElement, Keystroke, Modifiers, ParentElement, Render, RenderOnce, Role, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{Handler, HoverHelp, MainAction, MenuItem};
@@ -583,6 +587,11 @@ struct SelectList {
     handles: HashMap<SharedString, FocusHandle>,
     /// The layer it is drawn in, so a choice can close it.
     layer: Option<LayerId>,
+    /// The panel's scroll position, kept across frames so a list capped at the content area stays where the wheel or
+    /// a keyboard move scrolled it.
+    scroll: ScrollHandle,
+    /// Whether the list has asked to bring where focus starts into view ([`Render::render`]), which it does once.
+    revealed: bool,
 }
 
 impl SelectList {
@@ -596,6 +605,8 @@ impl SelectList {
             choices,
             handles,
             layer: None,
+            scroll: ScrollHandle::new(),
+            revealed: false,
         }
     }
 
@@ -619,7 +630,19 @@ impl SelectList {
 }
 
 impl Render for SelectList {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Bring where focus starts into view, once. The focus module scrolls nothing to a layer's start, which has no
+        // position before its first frame, so the list asks for it after its first frame is drawn: a deferred call
+        // runs once this frame is on screen, where the option and the panel have recorded where they are, and
+        // `reveal_control` scrolls by the least distance that shows the option whole with the focus module's margin,
+        // asking for the frame that shows it. The first frame shows the list from its top.
+        if !std::mem::replace(&mut self.revealed, true)
+            && let Some(start) = self.start()
+        {
+            window.defer(cx, move |window, cx| {
+                focus::reveal_control(&start, window, cx)
+            });
+        }
         let list = cx.weak_entity();
         let Choices {
             id,
@@ -654,12 +677,18 @@ impl Render for SelectList {
                 .on_click(move |_, window, cx| choose(&list, &value, window, cx))
             })
             .collect();
-        layers::panel(cx)
+        // Capped so the layer manager, which only shifts a popover, can keep all of it inside the content area (the
+        // module docs). The items keep their full height: none is a scroll container, so the flex column does not
+        // shrink them below their content.
+        let panel = layers::panel(cx)
             .id(ElementId::Name(format!("{id}-list").into()))
             .debug_selector(move || format!("{id}-list"))
             .role(Role::MenuListPopup)
             .aria_label(label)
-            .children(items)
+            .max_h(crate::notices_bell::window_cap(window))
+            .overflow_y_scroll()
+            .children(items);
+        focus::scroll_region(panel, &self.scroll)
     }
 }
 
