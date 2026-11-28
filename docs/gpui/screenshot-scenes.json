@@ -2663,6 +2663,16 @@
       "reference": null
     },
     {
+      "golden": "terminal-tab-overflow",
+      "title": "Overflowing terminal tabs: edge fades, scroll buttons and the all-tabs button, and a tight strip keeping only the all-tabs button",
+      "reference": null
+    },
+    {
+      "golden": "terminal-tab-overflow-menu",
+      "title": "The all-tabs list open below an overflowing strip, the shown tab ticked",
+      "reference": null
+    },
+    {
       "golden": "terminal-file-disclosures",
       "title": "Downloadable terminal file disclosures in three size tiers",
       "reference": null

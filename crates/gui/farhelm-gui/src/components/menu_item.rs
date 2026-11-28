@@ -32,7 +32,9 @@
 //! option, and its label kept to one line and cut with an ellipsis, since the list is exactly as wide as its control
 //! ([`crate::layers::Anchor::matching_width`]) and a native menu never wrapped an option. An unavailable choice says
 //! why after its label ([`MenuItem::suffix`]), as the old app's disabled `<option>`s did (" · " and the reason), and
-//! may carry a mark of its own after the tick's slot ([`MenuItem::mark`]), as a select's marked option does.
+//! may carry a mark of its own after the tick's slot ([`MenuItem::mark`]), as a select's marked option does. A choice
+//! that is a button in a group rather than an option in a list reports itself pressed instead of selected
+//! ([`MenuItem::reported_pressed`]).
 //!
 //! A command that is one of a set of choices in force (the session list's orders, a `menuitemradio` in the old app)
 //! says whether it is the one in force with [`MenuItem::checked`]: it keeps its icon and its description, reports
@@ -80,6 +82,8 @@ pub struct MenuItem {
     shortcut: Option<&'static str>,
     /// Whether this is a choice ([`MenuItem::choice`]), and then whether it is the chosen one.
     chosen: Option<bool>,
+    /// Whether a choice reports itself pressed rather than selected ([`MenuItem::reported_pressed`]).
+    chosen_pressed: bool,
     /// Whether this command is one of a set of choices in force ([`MenuItem::checked`]), and then whether it is the
     /// one in force.
     checked: Option<bool>,
@@ -120,6 +124,7 @@ impl MenuItem {
             suffix: None,
             shortcut: None,
             chosen: None,
+            chosen_pressed: false,
             checked: None,
             submenu: None,
             help: help.beside_menu(),
@@ -145,6 +150,16 @@ impl MenuItem {
         item.icon = chosen.then_some(Icon::Check);
         item.chosen = Some(chosen);
         item
+    }
+
+    /// A choice ([`MenuItem::choice`]) drawn the same, reported pressed or not instead of selected: for a choice made a
+    /// button ([`Role::Button`]) in a group of them, where selected is no state assistive technology announces, as it
+    /// is on an option in a select's list. The terminal strip's all-tabs list is one: its rows sit beside close
+    /// buttons, which a menu or a list box could not hold, so they are buttons, as the strip's own tabs are, and the
+    /// shown tab's row reports pressed, as its tab does.
+    pub(crate) fn reported_pressed(mut self) -> Self {
+        self.chosen_pressed = true;
+        self
     }
 
     /// The command is one of a set of choices in force (a menu's radio items, [`Role::MenuItemRadio`]), and `checked`
@@ -374,7 +389,17 @@ impl RenderOnce for MenuItem {
                         ))),
                 )
             })
-            .when_some(self.chosen, |item, chosen| item.aria_selected(chosen))
+            .when_some(self.chosen, |item, chosen| {
+                if self.chosen_pressed {
+                    item.aria_toggled(if chosen {
+                        Toggled::True
+                    } else {
+                        Toggled::False
+                    })
+                } else {
+                    item.aria_selected(chosen)
+                }
+            })
             .when_some(self.checked, |item, checked| {
                 item.aria_toggled(if checked {
                     Toggled::True

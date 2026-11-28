@@ -62,10 +62,25 @@
 //! - **The chosen tab is scrolled into view, once per choice.** Any way the choice changes (a press, a shortcut, a New
 //!   terminal the user waited for, a close's fallback, a restore) arms one request, which the strip's next draw spends
 //!   ([`TerminalSet::reveal_chosen`]); the wheel then moves the strip freely, since nothing is left to pull it back.
-//!   A draw that moves the strip's visible part as it spends the request (its first, a change of layout or width) asks
-//!   once more in the next, since GPUI places a reveal where the frame before left that part. A change of layout, which
-//!   the strip makes itself when its width crosses a tier, reveals the chosen tab again, as it does a focused control.
-//!   Keyboard focus reaching a strip control in the same frame takes precedence, and the request is dropped.
+//!   A draw that moves the strip's visible part as it spends the request (its first, a change of layout or width, the
+//!   overflow controls appearing or going) asks once more in the next, since GPUI places a reveal where the frame
+//!   before left that part. A change of layout, which the strip makes itself when its width crosses a tier, reveals the
+//!   chosen tab again, as it does a focused control. Keyboard focus reaching a strip control in the same frame takes
+//!   precedence, and the request is dropped.
+//!
+//! - **Overflow controls show only while the shell tabs overflow.** When the shell tabs are wider than the room
+//!   between the pinned main tab and New terminal, the strip fades whichever edge has tabs scrolled past it, and shows,
+//!   before New terminal's divider, a back and a forward button that step the tabs by most of the strip's width (each
+//!   disabled at its end) and an all-tabs button whose list holds every tab, the shown one ticked, to show one or close
+//!   a shell tab ([`AllTabsMenu`]); the maintainer chose these for the overflowing-tabs plan. A tight strip drops the
+//!   two scroll buttons first and keeps the all-tabs button ([`OverflowTier`]); one too tight for that beside a
+//!   control's width of shell tabs keeps only the fades, as does a strip that scrolls everything. Whether the tabs
+//!   overflow is decided from their own width against the room they would have without the controls, and while the
+//!   controls show they give back to the strip's content width exactly what they take, so showing them changes neither
+//!   the strip's width nor the answer ([`Overflow`]). Two keyboard details keep focus where the user can see and use
+//!   it: a fade is not painted over the control keyboard focus is on ([`paint_edge_fades`]), and a step that disables
+//!   the focused scroll button hands focus to the other one rather than letting it fall to the terminal
+//!   ([`TerminalSet::scroll_step`]).
 //!
 //! - **The choice survives a new view.** Reopening a session or reconnecting to the helm shows the remembered shell
 //!   tab if it has a terminal in the set. A deliberate selection or a close fallback updates the choice, and either
@@ -89,7 +104,7 @@ use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, EntityId,
     FocusHandle, Global, HoverListenerMode, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, Pixels, Render, Role, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, canvas, div,
     prelude::FluentBuilder as _, px, svg,
 };
 
@@ -102,12 +117,12 @@ use super::attachments::Carried;
 use super::tunnels::Tunnels;
 use crate::assets::Icon;
 use crate::components::{
-    Button, HoverHelp, IconButton, TERMINAL_TAB_CLOSE_SIDE, TERMINAL_TAB_INSET, TOOLBAR_ICON_GAP,
-    Tier,
+    Button, HoverHelp, IconButton, MenuItem, TERMINAL_TAB_CLOSE_SIDE, TERMINAL_TAB_INSET,
+    TOOLBAR_ICON_GAP, Tier,
 };
 use crate::focus::{self, Mark};
 use crate::host_text;
-use crate::layers::{self, Anchor, LayerId, Subject};
+use crate::layers::{self, Anchor, LayerId, Popover, Subject};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session::{self, UiSession};
@@ -290,10 +305,242 @@ const ADD_DIVIDER_MARGIN: f32 = 2.;
 const PINNED_ADD_WIDTH: f32 =
     STRIP_GAP + ADD_DIVIDER_MARGIN + ADD_DIVIDER_WIDTH + ADD_DIVIDER_MARGIN + STRIP_GAP + ADD_SIDE;
 
-/// The least width the scrolling shell tabs keep between the pinned main tab and the pinned New terminal: a control's
-/// worth, so a focused tab or × is still recognizable when scrolled into view (SPEC.md keeps the top row reachable down
-/// to a 650-pixel pane). A strip narrower than the three together scrolls everything instead ([`StripLayout::at`]).
-const PINNED_TABS_FLOOR: f32 = ADD_SIDE;
+/// The least width the scrolling shell tabs keep between the pinned main tab and the pinned New terminal (and the
+/// all-tabs button, while they overflow: [`OverflowTier`]): a control's worth, so a focused tab or × is still
+/// recognizable when scrolled into view (SPEC.md keeps the top row reachable down to a 650-pixel pane). A strip
+/// narrower than the main tab, New terminal and this together scrolls everything instead ([`StripLayout::at`]).
+pub(crate) const PINNED_TABS_FLOOR: f32 = ADD_SIDE;
+
+// ---- The overflow controls ------------------------------------------------------------------------------------------
+
+/// The element id of the box holding the overflow controls (the scroll buttons and the all-tabs button), drawn between
+/// the shell tabs and New terminal's divider only while the shell tabs overflow ([`Overflow`]).
+pub(crate) const OVERFLOW_CONTROLS_ID: &str = "session-terminal-overflow-controls";
+
+/// The button that scrolls the shell tabs back, toward the first, by a step ([`STEP_FRACTION`]).
+pub(crate) const SCROLL_BACK_ID: &str = "session-terminal-scroll-back";
+
+/// The button that scrolls the shell tabs forward, toward the last, by a step ([`STEP_FRACTION`]).
+pub(crate) const SCROLL_FORWARD_ID: &str = "session-terminal-scroll-forward";
+
+/// The all-tabs button, which opens or closes the list of every tab ([`AllTabsMenu`]).
+pub(crate) const ALL_TABS_ID: &str = "session-terminal-all-tabs";
+
+/// The all-tabs list's element id.
+pub(crate) const ALL_TABS_MENU_ID: &str = "session-terminal-all-tabs-menu";
+
+/// The element id of the all-tabs list's row that shows the main terminal.
+pub(crate) const ALL_TABS_AGENT_ID: &str = "session-terminal-all-tabs-agent";
+
+/// The element id of the all-tabs list's row that shows shell tab `id`. Not under the strip's own
+/// `session-terminal-tab-` prefix, which names the strip's tab buttons.
+pub(crate) fn all_tabs_row_id(id: &str) -> String {
+    format!("session-terminal-all-tabs-tab-{id}")
+}
+
+/// The element id of the × beside shell tab `id`'s row in the all-tabs list.
+pub(crate) fn all_tabs_close_id(id: &str) -> String {
+    format!("session-terminal-all-tabs-close-{id}")
+}
+
+/// The width the strip's tiers count for the all-tabs button and the gap before it: a square the size of New terminal.
+/// Only a threshold ([`OverflowTier::at`]): what the strip gives back while the controls show is their width as laid
+/// out ([`Overflow`]).
+pub(crate) const MENU_ROOM: f32 = STRIP_GAP + ADD_SIDE;
+
+/// The width the two scroll buttons take with the gaps before them: two squares the size of New terminal.
+const ARROWS_ROOM: f32 = 2. * (STRIP_GAP + ADD_SIDE);
+
+/// The least width the shell tabs keep beside the scroll buttons: about one tab's (a "Terminal 1" tab is a little under
+/// 100 pixels), so that a step is worth a press. A pinned strip with less room keeps only the all-tabs button
+/// ([`OverflowTier`]).
+const ARROWS_TABS_FLOOR: f32 = 96.;
+
+/// How much of the shell tabs' visible width one press of a scroll button moves them: most of it, so the tab cut at the
+/// far edge comes in whole while a little of what was shown stays, to keep the user's place.
+const STEP_FRACTION: f32 = 0.8;
+
+/// How wide each edge fade is at most: about a sixth of a tab, enough to read as "more this way" while a tab revealed
+/// against the left edge keeps its name clear of it (at the right edge, where a tab's name ends about 11 pixels from
+/// its end, the last few pixels of the name sit under the fade's faint end). A strip narrower than two fades gives each
+/// half of it. A fade over the control keyboard focus is on is not painted ([`paint_edge_fades`]).
+const FADE_WIDTH: f32 = 16.;
+
+/// Widths closer than this count as equal: layout's floating-point noise, well under a pixel.
+const WIDTH_EPS: f32 = 0.5;
+
+/// How much room to spare the shell tabs need before the overflow controls go away again: a hair of hysteresis, so
+/// layout's rounding at the boundary cannot alternate the two answers frame after frame ([`Overflow`]).
+const HIDE_SLACK: f32 = 1.;
+
+/// Which overflow controls a pinned strip draws while its shell tabs overflow ([`Overflow`]): the strip's width tiers
+/// below the pinned layout's own ([`StripLayout`]). Chosen, like the layout, from the strip's and the main tab's widths
+/// as last laid out, which do not depend on the controls (they give back what they take), so the tier settles within a
+/// frame of a change of width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OverflowTier {
+    /// No controls, only the edge fades: a pinned strip without room for the all-tabs button beside a control's width
+    /// of shell tabs ([`PINNED_TABS_FLOOR`]), which the button would otherwise take, leaving a focused tab no room to be
+    /// scrolled into view. It is the narrowest pinned band, [`MENU_ROOM`] wide, seen only in narrow panes; narrower
+    /// still, the strip scrolls everything ([`StripLayout::Scrolling`]).
+    NoRoom,
+    /// The all-tabs button alone: the scroll buttons are dropped first, so a tight strip keeps the one control that
+    /// reaches any tab in a press (the plan's "degrade gracefully" criterion).
+    Menu,
+    /// The back and forward buttons, then the all-tabs button.
+    ArrowsAndMenu,
+}
+
+impl OverflowTier {
+    /// The tier of a pinned strip `strip` wide whose main tab is `agent` wide: the scroll buttons too when the strip
+    /// still leaves the shell tabs [`ARROWS_TABS_FLOOR`] beside every control, the all-tabs button alone when it leaves
+    /// them [`PINNED_TABS_FLOOR`] beside that, and nothing otherwise. A zero strip width is a strip not laid out yet, as
+    /// for [`StripLayout::at`], and gets every control.
+    fn at(strip: Pixels, agent: Pixels) -> OverflowTier {
+        let beside =
+            |tabs: f32, controls: f32| agent + px(STRIP_GAP + tabs + controls + PINNED_ADD_WIDTH);
+        if strip == px(0.) || strip >= beside(ARROWS_TABS_FLOOR, ARROWS_ROOM + MENU_ROOM) {
+            OverflowTier::ArrowsAndMenu
+        } else if strip >= beside(PINNED_TABS_FLOOR, MENU_ROOM) {
+            OverflowTier::Menu
+        } else {
+            OverflowTier::NoRoom
+        }
+    }
+
+    /// The width this tier's controls are taken to need, with the gap before them, until they have been laid out once.
+    fn room(self) -> Pixels {
+        match self {
+            OverflowTier::NoRoom => px(0.),
+            OverflowTier::Menu => px(MENU_ROOM),
+            OverflowTier::ArrowsAndMenu => px(MENU_ROOM + ARROWS_ROOM),
+        }
+    }
+}
+
+/// Whether the strip shows its overflow controls, as it last decided, and the widths that decision and the strip's
+/// width rest on ([`TerminalSet::settle_overflow`]).
+///
+/// Showing the controls must not change the answer, or they would come and go on alternate frames. They take width
+/// from the shell tabs; and beside a tunnel pill the top row shares a short row between the strip and the pill in
+/// proportion to their content widths (`session_pane::header`'s fit), so controls that only added to the strip's
+/// content would also widen the strip, and the tabs might then fit without them. So while they show, the box around the
+/// shell tabs is capped at the tabs' own width less the controls' (`max_w`, which bounds what the box contributes to
+/// the strip's content width): the strip's content width, and so its width, stay what they are without the controls.
+/// The answer then compares the tabs' own width, which nothing here changes, with the same room in either case: the
+/// visible width while the controls are hidden, and that width with the controls' place while they show. Both widths
+/// are measured as the strip is laid out, and a strip drawn with a cap from other widths than it then measures (a tab
+/// opened, the controls first drawn) asks for one more frame before deciding, so every decision rests on a cap that
+/// matched. Rounding at the boundary is absorbed by [`HIDE_SLACK`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Overflow {
+    /// Whether the controls are drawn.
+    shown: bool,
+    /// The shell tabs' own width, from the first tab's start to the last tab's end, as last laid out.
+    tabs: Pixels,
+    /// The controls' width with the gap before them, as last laid out, and the tier they were drawn in then; `None`
+    /// until they are first drawn. Used only for that tier: the other tier draws other controls, so after a change of
+    /// tier with the controls hidden in between, the next show takes that tier's own estimate ([`OverflowTier::room`])
+    /// rather than a width that would give the strip a wrong cap for a frame (and, beside a pill, a wrong width).
+    controls: Option<(OverflowTier, Pixels)>,
+}
+
+/// What a strip drew of its overflow controls, for the layout check after it ([`TerminalSet::settle_overflow`]).
+#[derive(Clone, Copy, Debug)]
+struct DrawnOverflow {
+    /// Whether the strip could draw the controls at all: pinned, with shell tabs, and room for them
+    /// ([`OverflowTier::NoRoom`] has none). A scrolling strip never does.
+    eligible: bool,
+    /// Whether it drew them.
+    shown: bool,
+    /// Which of them it drew.
+    tier: OverflowTier,
+    /// The widths the cap on the shell tabs' box was computed from ([`Overflow`]): the tabs', then the controls'.
+    tabs: Pixels,
+    controls: Pixels,
+    /// Whether the tabs were scrolled to their start and to their end as the scroll buttons were drawn
+    /// ([`scroll_ends`]), each of which disables one of them.
+    ends: (bool, bool),
+}
+
+/// Whether the strip's scrolling part is scrolled to its start and to its end, as `scroll` last placed it: where the
+/// back and forward buttons have nothing to do, and the edge that needs no fade.
+fn scroll_ends(scroll: &ScrollHandle) -> (bool, bool) {
+    let offset = scroll.offset().x;
+    let max = scroll.max_offset().x;
+    (offset >= px(-WIDTH_EPS), offset <= -max + px(WIDTH_EPS))
+}
+
+/// Paint the strip's edge fades over its scrolling part, from `scroll` as this frame placed it: on the left while
+/// something is scrolled out past the start, on the right while something is past the end, each from the strip's
+/// `ground` to transparent. Read at paint time, after layout has clamped the offset and resolved any reveal, so a fade
+/// never lags a scroll (`settings::frame`'s page rule does the same for its heading's edge). Paint only: the tabs under
+/// a fade still take their presses.
+///
+/// A fade is left out while the control keyboard focus is on, one of the scrolling part's `focusable` controls, sits
+/// under it with its focus ring. A control focus reaches is scrolled only just into view ([`TerminalSet::reveal_close`]
+/// keeps a ×'s ring [`RING_ROOM`] from the edge, and a tab revealed as an item starts at the edge), which puts it under
+/// the fade's opaque end: Shift+Tab back through an overflowing strip would otherwise land on ×s and tabs half painted
+/// over, ring and all. The hint that more tabs lie that way matters less than seeing where focus is, and the scroll
+/// buttons still say it.
+fn paint_edge_fades(
+    scroll: &ScrollHandle,
+    ground: Hsla,
+    focusable: &[FocusHandle],
+    window: &mut Window,
+    cx: &App,
+) {
+    // This frame's bounds: the coordinator records a control's as the frame is prepared, and this paints after that.
+    let focused = focusable
+        .iter()
+        .find(|handle| handle.is_focused(window))
+        .and_then(|handle| focus::control_bounds(handle, window, cx));
+    let (left, right) = fade_edges(scroll.bounds(), scroll_ends(scroll), focused);
+    let clear = ground.opacity(0.);
+    // Each fade runs from the ground at the strip's edge to transparent inward: 90 degrees points right, 270 left.
+    for (edge, angle) in [(left, 90.), (right, 270.)] {
+        if let Some(edge) = edge {
+            let fade = gpui::linear_gradient(
+                angle,
+                gpui::linear_color_stop(ground, 0.),
+                gpui::linear_color_stop(clear, 1.),
+            );
+            window.paint_quad(gpui::fill(edge, fade));
+        }
+    }
+}
+
+/// Where [`paint_edge_fades`] paints, left then right, for a scrolling part laid out at `viewport` that is at its
+/// start and its end as `ends` says ([`scroll_ends`]), while the control keyboard focus is on, if it is one of that
+/// part's, is drawn at `focused`: a fade [`FADE_WIDTH`] wide (half the viewport, if that is less) along each edge
+/// that has tabs scrolled past it, except one that would touch the focused control or its focus ring.
+fn fade_edges(
+    viewport: Bounds<Pixels>,
+    (at_start, at_end): (bool, bool),
+    focused: Option<Bounds<Pixels>>,
+) -> (Option<Bounds<Pixels>>, Option<Bounds<Pixels>>) {
+    let width = px(FADE_WIDTH).min(viewport.size.width / 2.);
+    let ringed = focused.map(|bounds| bounds.dilate(px(RING_ROOM)));
+    let unless_focused = |edge: Bounds<Pixels>| {
+        (!ringed.is_some_and(|ringed| ringed.intersects(&edge))).then_some(edge)
+    };
+    let left = (!at_start)
+        .then(|| {
+            let mut edge = viewport;
+            edge.size.width = width;
+            edge
+        })
+        .and_then(unless_focused);
+    let right = (!at_end)
+        .then(|| {
+            let mut edge = viewport;
+            edge.origin.x = viewport.right() - width;
+            edge.size.width = width;
+            edge
+        })
+        .and_then(unless_focused);
+    (left, right)
+}
 
 /// Which of the strip's controls stay put while the shell tabs scroll: its width tiers. Chosen from widths that do not
 /// depend on the layout ([`StripLayout::at`]), so the strip settles on one within a frame of any change of width.
@@ -318,7 +565,9 @@ impl StripLayout {
     /// The layout of a strip `strip` wide whose main tab is `agent` wide, as each was last laid out, with or without
     /// shell tabs: pinned when the strip holds the main tab, New terminal and (when there are shell tabs) a gap and a
     /// control's width of them ([`PINNED_TABS_FLOOR`]) between, else scrolling. Without shell tabs there is nothing to
-    /// give scrolling room to, so the two pinned ends need only fit.
+    /// give scrolling room to, so the two pinned ends need only fit. The overflow controls are not counted here: they
+    /// have tiers of their own inside the pinned layout ([`OverflowTier`]), so that they never move New terminal out of
+    /// its pinned place at a width where it had one before them.
     ///
     /// Neither width depends on the layout, which is what keeps the layout from flipping back: the main tab is the
     /// same button wherever it sits, and the strip's content is the same items and gaps in either layout (the pinned
@@ -386,10 +635,17 @@ fn closing(key: &str, id: &str, cx: &App) -> bool {
 }
 
 /// The × of shell tab `id` (named `label` now) was pressed: close it at once when **Skip session confirmations** is on
-/// (SPEC.md: the switch skips "terminal-tab Close"), else ask first, hung under the ×. The question names the tab as it
-/// was named when it opened and acts on its id, so a tab before it closing in the meantime closes the right one. The
-/// set records the question's layer ([`TerminalSet::asking`]), so the × stays shown while its question is open, even
-/// once the pointer has left the tab for the question.
+/// (SPEC.md: the switch skips "terminal-tab Close"), else ask first, hung under `anchor` (the × itself, or the all-tabs
+/// button for a × in the all-tabs list, which has closed by then). An anchor that is gone opens the question in the
+/// middle of the window rather than not at all, which is what [`prompt::ask_anchored`] alone would do, since it refuses
+/// an undrawn anchor. For the strip's own × that changes nothing in practice, as the press came from a drawn ×. The
+/// check can lag by a frame: [`Anchor::drawn_bounds`] still reports an element's last bounds during the one frame that
+/// no longer draws it, so an anchor gone in that frame still gets the anchored question, which closes as its anchor
+/// goes.
+/// The question names the tab as it was named when it opened and acts on its id, so a tab before it closing in the
+/// meantime closes the right one. The set records the
+/// question's layer ([`TerminalSet::asking`]), so the strip's × stays shown while its question is open, even once the
+/// pointer has left the tab for the question.
 fn ask_to_close(
     set: &Entity<TerminalSet>,
     id: &str,
@@ -425,22 +681,46 @@ fn ask_to_close(
         Tier::Neutral,
     ));
     let confirmed = set.downgrade();
-    let asked = prompt::ask_anchored(
-        question,
-        anchor.clone(),
-        Some(Subject::of(set)),
-        &mark,
-        move |id, _, cx| {
-            let _ = confirmed.update(cx, |set, cx| set.close_tab(&id, cx));
-        },
-        window,
-        cx,
-    );
+    let on_confirm = move |id: String, _: &mut Window, cx: &mut App| {
+        let _ = confirmed.update(cx, |set, cx| set.close_tab(&id, cx));
+    };
+    let subject = Some(Subject::of(set));
+    let asked = if anchor.drawn_bounds().is_some() {
+        prompt::ask_anchored(
+            question,
+            anchor.clone(),
+            subject,
+            &mark,
+            on_confirm,
+            window,
+            cx,
+        )
+    } else {
+        prompt::ask(question, subject, &mark, on_confirm, window, cx)
+    };
     if let Some(layer) = asked {
         set.update(cx, |set, cx| {
             set.asking = Some((id.to_owned(), layer));
             cx.notify();
         });
+    }
+}
+
+/// The main tab's label and hover help for session `key`, in the strip and in the all-tabs list alike. A shell
+/// session's main terminal runs the shell itself, and its row already says "No agent", so its tab names the shell rather
+/// than an agent that is not there. A row not listed yet keeps the agent wording.
+fn main_tab_words(key: &str, cx: &App) -> (&'static str, &'static str) {
+    let shell = session::current_store(cx).is_some_and(|store| {
+        store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(key)
+            .is_some_and(|row| row.info.launch.is_shell())
+    });
+    if shell {
+        ("Shell", "Shell: show the session's shell")
+    } else {
+        ("Agent", "Agent: show the session's agent terminal")
     }
 }
 
@@ -582,6 +862,21 @@ pub struct TerminalSet {
     /// The main tab's bounds as last laid out, through the box around it ([`AGENT_SLOT_ID`]): its width is part of what
     /// pinning it costs ([`StripLayout::at`]), and is the same wherever it sits. Its scroll position is never used.
     agent_bounds: ScrollHandle,
+    /// Whether the overflow controls show and the widths behind that ([`Overflow`]): decided by the strip's layout
+    /// check, which runs while the frame is prepared, hence a `Cell`.
+    overflow: Cell<Overflow>,
+    /// The overflow controls' bounds as last laid out, through their box ([`OVERFLOW_CONTROLS_ID`]): their width is
+    /// what the strip gives back while they show ([`Overflow`]). Its scroll position is never used.
+    controls_bounds: ScrollHandle,
+    /// The all-tabs button's focus handle, held here so its list can return focus to it when it closes, as a menu's
+    /// toggle does (on macOS the click that opened the list left the button unfocused).
+    all_tabs_focus: FocusHandle,
+    /// The back and forward scroll buttons' focus handles, held here so a step that reaches one end can hand focus
+    /// from the button it disables to the other ([`TerminalSet::scroll_step`]).
+    scroll_focus: [FocusHandle; 2],
+    /// The all-tabs list's layer, while it may be open. Never cleared, only replaced, as `asking` is: the layer
+    /// manager says whether it is still open whenever the strip draws.
+    all_tabs: Option<LayerId>,
     /// Whether the terminals are inert ([`TerminalSet::set_inert`]), which new tabs take on too.
     inert: bool,
     /// The tab whose close question was asked last, by id, and the question's layer: while that layer is open, the
@@ -642,6 +937,18 @@ impl TerminalSet {
             chosen_reveal: Cell::new(ChosenReveal::Done),
             strip_bounds: ScrollHandle::new(),
             agent_bounds: ScrollHandle::new(),
+            overflow: Cell::new(Overflow {
+                shown: false,
+                tabs: px(0.),
+                controls: None,
+            }),
+            controls_bounds: ScrollHandle::new(),
+            all_tabs_focus: cx.focus_handle().tab_stop(true),
+            scroll_focus: [
+                cx.focus_handle().tab_stop(true),
+                cx.focus_handle().tab_stop(true),
+            ],
+            all_tabs: None,
             inert: false,
             asking: None,
             close_anchors: RefCell::new(HashMap::new()),
@@ -1061,6 +1368,11 @@ impl TerminalSet {
     /// reaches while scrolled out of view is scrolled into it ([`TerminalSet::reveal_focused`]), and so is the chosen
     /// tab once each time the choice changes ([`TerminalSet::reveal_chosen`]).
     ///
+    /// While the shell tabs overflow, the scrolling part's edges fade where tabs are scrolled past them
+    /// ([`paint_edge_fades`]), and the overflow controls sit between it and the divider
+    /// ([`TerminalSet::overflow_controls`]); the layout check after the frame decides whether they show next frame
+    /// ([`TerminalSet::settle_overflow`]).
+    ///
     /// A shell tab's × shows, in place of its terminal mark, while the pointer is over the tab's box (not while the set
     /// is inert), keyboard focus is on the tab or its ×, its close question is open ([`TerminalSet::asking`]), or its
     /// close is in flight (see the module docs for why it moved there). How it is drawn holds three invariants:
@@ -1098,6 +1410,28 @@ impl TerminalSet {
         // Any reveal asked for above is placed against this viewport, where the last frame put the scrolling part; the
         // layout check below compares it with where this frame puts it.
         let placed_against = this.scroll.bounds();
+        // The overflow controls as the last layout check left them ([`Overflow`]), and the cap that keeps the strip's
+        // width what it is without them.
+        let tier = OverflowTier::at(
+            this.strip_bounds.bounds().size.width,
+            this.agent_bounds.bounds().size.width,
+        );
+        let overflow = this.overflow.get();
+        let eligible = layout == StripLayout::Pinned && shell_tabs && tier != OverflowTier::NoRoom;
+        let drawn = DrawnOverflow {
+            eligible,
+            shown: eligible && overflow.shown,
+            tier,
+            tabs: overflow.tabs,
+            controls: overflow
+                .controls
+                .filter(|(measured_in, _)| *measured_in == tier)
+                .map_or_else(|| tier.room(), |(_, width)| width),
+            ends: scroll_ends(&this.scroll),
+        };
+        let cap = drawn
+            .shown
+            .then(|| drawn.tabs + px(STRIP_GAP) - drawn.controls);
         let mut close_anchors = HashMap::new();
         let listed: Vec<(String, FocusHandle, FocusHandle)> = this
             .tabs
@@ -1106,6 +1440,14 @@ impl TerminalSet {
             .collect();
         let agent_focus = this.agent_focus.clone();
         let add_focus = this.add_focus.clone();
+        // The controls that scroll, which a fade must not paint over while one holds focus ([`paint_edge_fades`]).
+        let mut fade_guarded: Vec<FocusHandle> = listed
+            .iter()
+            .flat_map(|(_, focus, close_focus)| [focus.clone(), close_focus.clone()])
+            .collect();
+        if layout == StripLayout::Scrolling {
+            fade_guarded.extend([agent_focus.clone(), add_focus.clone()]);
+        }
         let scroll = this.scroll.clone();
         let strip_bounds = this.strip_bounds.clone();
         let agent_bounds = this.agent_bounds.clone();
@@ -1147,20 +1489,7 @@ impl TerminalSet {
                 }
             }
         };
-        // A shell session's main terminal runs the shell itself, and its row already says "No agent", so its tab names
-        // the shell rather than an agent that is not there. A row not listed yet keeps the agent wording.
-        let shell = session::current_store(cx).is_some_and(|store| {
-            store
-                .read(cx)
-                .collections()
-                .get::<SessionRow>(&key)
-                .is_some_and(|row| row.info.launch.is_shell())
-        });
-        let (main_label, main_help) = if shell {
-            ("Shell", "Shell: show the session's shell")
-        } else {
-            ("Agent", "Agent: show the session's agent terminal")
-        };
+        let (main_label, main_help) = main_tab_words(&key, cx);
         // The box records the main tab's width wherever it sits, for the next frame's layout ([`StripLayout::at`]).
         let main_tab = div()
             .id(AGENT_SLOT_ID)
@@ -1339,6 +1668,32 @@ impl TerminalSet {
             .overflow_x_scroll()
             .track_scroll(&scroll)
             .children(items);
+        // The scrolling part sits in a box of its own that takes its place in the flow: the edge fades paint over it,
+        // and while the overflow controls show, the box's cap gives back their width to the strip's content width
+        // ([`Overflow`]). It adds nothing to the layout otherwise: it grows and shrinks as the scrolling part did.
+        let fades = {
+            let scroll = scroll.clone();
+            let ground = theme::color(palette.bg_1);
+            let focusable = fade_guarded;
+            canvas(
+                |_, _, _| (),
+                move |_, (), window, cx| paint_edge_fades(&scroll, ground, &focusable, window, cx),
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        };
+        let tabs = div()
+            .relative()
+            .flex()
+            .flex_row()
+            .items_center()
+            .flex_auto()
+            .min_w_0()
+            .when_some(cap, |tabs, cap| tabs.max_w(cap))
+            .child(tabs)
+            .child(fades);
         // The pinned main tab and the scrolling part share a box that takes the strip's free width, as the scrolling
         // part does on its own in the narrow layout, so New terminal stays at the strip's right end and the shell tabs
         // get the room between.
@@ -1354,6 +1709,9 @@ impl TerminalSet {
                 .into_any_element(),
             None => tabs.into_any_element(),
         };
+        let controls = drawn
+            .shown
+            .then(|| TerminalSet::overflow_controls(set, &drawn, window, cx));
         let weak = set.downgrade();
         let strip = div()
             .on_children_prepainted(move |_, window, cx| {
@@ -1388,6 +1746,10 @@ impl TerminalSet {
                 let viewport = scroll_now.bounds();
                 let moved = viewport.left() != placed_against.left()
                     || viewport.right() != placed_against.right();
+                let tier_now = OverflowTier::at(
+                    strip_bounds_now.bounds().size.width,
+                    agent_bounds_now.bounds().size.width,
+                );
                 let again = weak.upgrade().is_some_and(|set| {
                     let set = set.read(cx);
                     // A focused control is keyed by the layout too, so a change of layout reveals it again anyway.
@@ -1396,10 +1758,17 @@ impl TerminalSet {
                         set.revealed.set(None);
                     }
                     let reveal = &set.chosen_reveal;
-                    if changed || (moved && chosen_requested) {
+                    // Evaluated whatever the reveal says, since it records this frame's widths.
+                    let overflow = set.settle_overflow(drawn, tier_now);
+                    // A reveal placed against a viewport that the overflow controls are about to narrow or widen
+                    // would leave its tab cut at the edge, so it is asked for again too, until the strip settles.
+                    // `moved` alone would not do here: this frame did not move the viewport, the next one will, and
+                    // only a request carried into it lets that frame's `moved` ask once more against the viewport
+                    // the controls leave.
+                    if changed || ((moved || overflow) && chosen_requested) {
                         reveal.set(ChosenReveal::Again);
                     }
-                    focus_again || reveal.get() == ChosenReveal::Again
+                    focus_again || reveal.get() == ChosenReveal::Again || overflow
                 });
                 if changed || again {
                     window.defer(cx, |window, _| window.refresh());
@@ -1419,8 +1788,264 @@ impl TerminalSet {
             .track_scroll(&strip_bounds)
             .when(inert, |strip| strip.opacity(INERT_OPACITY))
             .child(lead)
+            .children(controls)
             .children(pinned_add);
         strip.into_any_element()
+    }
+
+    /// The overflow controls `drawn` says to draw, in their box, which records their width in the set's
+    /// `controls_bounds`: the back and forward buttons in the wider tier, then the all-tabs button, a chevron named for
+    /// the count of shell tabs, which wears the pressed look while its list is open. Each is an ordinary button: a tab
+    /// stop in the strip's order (after the shell tabs, before New terminal) while enabled. A scroll button is disabled
+    /// at its end, as SPEC.md has it; a step that disables the one holding focus hands focus to the other
+    /// ([`Self::scroll_step`]). All of them are disabled while the set is inert.
+    ///
+    /// The all-tabs button's anchor is keyed by the session, as the tunnel pill's is: its list and a close question
+    /// asked from that list hang from it, and belong to the session whose tabs they show.
+    fn overflow_controls(
+        set: &Entity<TerminalSet>,
+        drawn: &DrawnOverflow,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let this = set.read(cx);
+        let (inert, key, tab_count) = (this.inert, this.key.clone(), this.tabs.len());
+        let open = this
+            .all_tabs
+            .is_some_and(|layer| layers::is_open(layer, window, cx));
+        let all_tabs_focus = this.all_tabs_focus.clone();
+        let controls_bounds = this.controls_bounds.clone();
+        let [back_focus, forward_focus] = this.scroll_focus.clone();
+        let (at_start, at_end) = drawn.ends;
+        let arrow = |id: &'static str,
+                     icon: Icon,
+                     label: &str,
+                     help: &str,
+                     forward: bool,
+                     end: bool,
+                     focus: &FocusHandle| {
+            let set = set.clone();
+            IconButton::new(
+                id,
+                icon,
+                label.to_owned(),
+                HoverHelp::tooltip(help.to_owned()).below(),
+                Role::Button,
+            )
+            .tier(Tier::Ghost)
+            .square(px(ADD_SIDE))
+            .focus(focus)
+            .disabled(inert || end)
+            .on_click(move |_, window, cx| TerminalSet::scroll_step(&set, forward, window, cx))
+        };
+        let anchor = Anchor::for_element(
+            SharedString::from(format!("{ALL_TABS_ID}-anchor-{key}")),
+            window,
+            cx,
+        );
+        let toggled = anchor.clone();
+        let words = if tab_count == 1 {
+            "1 shell tab".to_owned()
+        } else {
+            format!("{tab_count} shell tabs")
+        };
+        let set_for_toggle = set.clone();
+        // A chevron alone, a square like its neighbours: the count would make it twice as wide, and in a narrow pane
+        // that width decides whether it fits at all ([`OverflowTier`]); the count is in its name and its help.
+        let button = IconButton::new(
+            ALL_TABS_ID,
+            Icon::ChevronDown,
+            format!("All tabs: {words}"),
+            HoverHelp::tooltip(format!(
+                "All tabs: list the main terminal and the {words}, to show or close one"
+            ))
+            .below(),
+            Role::Button,
+        )
+        .tier(Tier::Ghost)
+        .square(px(ADD_SIDE))
+        .expanded(open)
+        .disabled(inert)
+        .focus(&all_tabs_focus)
+        .on_click(move |_, window, cx| {
+            TerminalSet::toggle_all_tabs(&set_for_toggle, toggled.clone(), window, cx)
+        });
+        div()
+            .id(OVERFLOW_CONTROLS_ID)
+            .debug_selector(|| OVERFLOW_CONTROLS_ID.into())
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(STRIP_GAP))
+            .track_scroll(&controls_bounds)
+            .when(drawn.tier == OverflowTier::ArrowsAndMenu, |controls| {
+                controls
+                    .child(arrow(
+                        SCROLL_BACK_ID,
+                        Icon::ChevronLeft,
+                        "Scroll tabs back",
+                        "Scroll tabs back: show the tabs before these",
+                        false,
+                        at_start,
+                        &back_focus,
+                    ))
+                    .child(arrow(
+                        SCROLL_FORWARD_ID,
+                        Icon::ChevronRight,
+                        "Scroll tabs forward",
+                        "Scroll tabs forward: show the tabs after these",
+                        true,
+                        at_end,
+                        &forward_focus,
+                    ))
+            })
+            .child(
+                div()
+                    .relative()
+                    .flex_none()
+                    .child(button)
+                    .child(anchor.track()),
+            )
+            .into_any_element()
+    }
+
+    /// Step the shell tabs back (`forward` false) or forward by [`STEP_FRACTION`] of their visible width, stopping at
+    /// either end: a scroll button's press. A plain move of the strip's offset, as a wheel turn makes, so it leaves no
+    /// reveal behind to pull the strip back, and the next draw shows it (no animation: the strip jumps, as the plan
+    /// asks, with no repeat while held).
+    ///
+    /// A step that reaches the end disables the button pressed, and when that button holds focus (Tab and Space, or a
+    /// click on Linux, where a press focuses), focus moves to the other scroll button, which the step has just given
+    /// something to do. Left alone, the focus coordinator would recover the lost focus to the page's home, the
+    /// session's terminal, and the user's next Space or Enter, still meant for the button, would go to the shell, where
+    /// Enter runs whatever is on its command line.
+    fn scroll_step(set: &Entity<TerminalSet>, forward: bool, window: &mut Window, cx: &mut App) {
+        let this = set.read(cx);
+        let step = this.scroll.bounds().size.width * STEP_FRACTION;
+        let max = this.scroll.max_offset().x;
+        let mut offset = this.scroll.offset();
+        offset.x = if forward {
+            offset.x - step
+        } else {
+            offset.x + step
+        }
+        .clamp(-max, px(0.));
+        this.scroll.set_offset(offset);
+        window.refresh();
+        let (at_start, at_end) = scroll_ends(&this.scroll);
+        let [back, forward_focus] = &this.scroll_focus;
+        let (pressed, other, reached, other_has_room) = if forward {
+            (forward_focus, back, at_end, !at_start)
+        } else {
+            (back, forward_focus, at_start, !at_end)
+        };
+        if reached && other_has_room && pressed.is_focused(window) {
+            let other = other.clone();
+            focus::focus_control(&other, &Mark::take(cx), window, cx);
+        }
+    }
+
+    /// The strip's layout check for its overflow controls, once this frame has laid it out ([`Overflow`]): record the
+    /// shell tabs' and the controls' widths, decide whether the controls show, and say whether the strip must be drawn
+    /// again for what it found. `drawn` is what this frame drew, and `tier` the tier this frame's widths give.
+    ///
+    /// Hidden, they show once the tabs are wider than their visible width. Shown, they go once the tabs would fit in
+    /// the room they had without them, the visible width and the controls' place, with [`HIDE_SLACK`] to spare; and
+    /// before that, a frame whose cap came from other widths than it measured asks for another rather than decide,
+    /// as does one whose tier changed or whose scroll buttons were drawn for an end that moved (a reveal or a wheel
+    /// turn in the same frame), so neither the cap nor a button's state is stale for more than one frame. Not pinned,
+    /// without shell tabs, or without room for them, the strip has no controls; a change of tier there still asks for
+    /// another frame, since the next one may have room.
+    fn settle_overflow(&self, drawn: DrawnOverflow, tier: OverflowTier) -> bool {
+        let mut state = self.overflow.get();
+        let viewport = self.scroll.bounds();
+        let tabs = self.shell_tabs_width();
+        let mut again = false;
+        if !drawn.eligible {
+            state.shown = false;
+            // A pinned strip widening out of the tier with no room (a pill closing beside it, say) changes no layout,
+            // and nothing else asks for the frame that would find its tabs overflowing and show the controls.
+            again = tier != drawn.tier;
+        } else if !drawn.shown {
+            state.tabs = tabs;
+            if tabs > viewport.size.width + px(WIDTH_EPS) {
+                state.shown = true;
+                again = true;
+            }
+        } else {
+            let controls = self.controls_bounds.bounds();
+            let width = controls.size.width + px(STRIP_GAP);
+            state.tabs = tabs;
+            state.controls = Some((drawn.tier, width));
+            let cap_matched = (tabs - drawn.tabs).abs() < px(WIDTH_EPS)
+                && (width - drawn.controls).abs() < px(WIDTH_EPS);
+            if !cap_matched {
+                again = true;
+            } else if tabs <= controls.right() - viewport.left() - px(HIDE_SLACK) {
+                state.shown = false;
+                again = true;
+            } else {
+                again = tier != drawn.tier || scroll_ends(&self.scroll) != drawn.ends;
+            }
+        }
+        self.overflow.set(state);
+        again
+    }
+
+    /// The shell tabs' own width as the strip last laid them out, from the first tab's start to the last tab's end, which
+    /// no cap or control changes ([`Overflow`]): read from the scrolling part's items while it holds only the shell
+    /// tabs (the pinned layout), and from its scrollable width otherwise.
+    fn shell_tabs_width(&self) -> Pixels {
+        let count = self.tabs.len();
+        let ends = (count > 0 && self.scroll.children_count() == count)
+            .then(|| {
+                let first = self.scroll.bounds_for_item(0)?;
+                let last = self.scroll.bounds_for_item(count - 1)?;
+                Some(last.right() - first.left())
+            })
+            .flatten();
+        ends.unwrap_or_else(|| self.scroll.bounds().size.width + self.scroll.max_offset().x)
+    }
+
+    /// The all-tabs button was pressed: close its list if it is open (which returns focus to the button), else open it
+    /// below the button, `anchor`, with focus on the shown tab's row, which it scrolls into view. The list keeps Tab
+    /// inside it and returns focus to the button when it closes, as a menu a toggle opens does: it is a chooser the user
+    /// opens, picks from and leaves, not a group of controls in the page's order like the tunnel list.
+    fn toggle_all_tabs(
+        set: &Entity<TerminalSet>,
+        anchor: Anchor,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(open) = set
+            .read(cx)
+            .all_tabs
+            .filter(|layer| layers::is_open(*layer, window, cx))
+        {
+            layers::close(open, window, cx);
+            set.update(cx, |set, cx| {
+                set.all_tabs = None;
+                cx.notify();
+            });
+            return;
+        }
+        let mark = Mark::take(cx);
+        let menu = cx.new(|cx| AllTabsMenu::new(set, anchor.clone(), cx));
+        let start = menu.read(cx).start(set.read(cx));
+        let toggle = set.read(cx).all_tabs_focus.clone();
+        let layer = layers::open_popover(
+            Popover::menu(menu.clone(), cx.focus_handle(), anchor, start)
+                .returns_to(focus::ReturnTo::Control(toggle)),
+            &mark,
+            window,
+            cx,
+        );
+        menu.update(cx, |menu, _| menu.layer = layer);
+        set.update(cx, |set, cx| {
+            set.all_tabs = layer;
+            cx.notify();
+        });
     }
 
     /// Scroll the strip to the control keyboard focus is on, once per control it reaches (see `revealed`): a tab, a
@@ -1773,5 +2398,249 @@ impl Render for TerminalSet {
             .flex_col()
             .children(refusals)
             .child(shown)
+    }
+}
+
+// ---- The all-tabs list ----------------------------------------------------------------------------------------------
+
+/// The all-tabs list's width: room for a tab's name, the tick before it and the × after it.
+const ALL_TABS_MENU_WIDTH: f32 = 240.;
+
+/// The all-tabs list below the strip's all-tabs button ([`TerminalSet::toggle_all_tabs`]): a row for the main terminal,
+/// then one per shell tab in the strip's order, the shown one ticked ([`MenuItem::choice`]), and beside each shell
+/// tab's row a × of its own. The × is the row's sibling, not inside its button: a control inside a control is what the
+/// strip's tabs avoid too, and the tunnel list lays its rows out the same way. Up and Down walk the rows and their ×s
+/// (the menu context of [`layers::panel`]), and a list longer than the window scrolls, with the shown tab's row
+/// scrolled into view as it opens.
+///
+/// To assistive technology it is a group of buttons, not a menu, as the tunnel list is: a menu could not hold the ×
+/// buttons. So each row is a button that reports itself pressed when its tab is the one shown, as the strip's tabs do
+/// ([`MenuItem::reported_pressed`]); the selected state a select's option reports is not announced on a button, which
+/// would leave the tick unspoken.
+///
+/// Choosing a row closes the list, which returns focus to the all-tabs button, and then shows that tab as a press on
+/// its tab would, so the strip scrolls it into view ([`TerminalSet::choose`]). A × closes the list first and then asks
+/// whether to close the tab as the strip's × does ([`ask_to_close`]), hung under the all-tabs button, since the row it
+/// was pressed on is gone with the list and the tab itself may be scrolled out of view. It reads the set as it draws, so
+/// a tab opened or closed meanwhile appears or goes, and a tab whose close is in flight shows its × busy.
+pub(crate) struct AllTabsMenu {
+    set: WeakEntity<TerminalSet>,
+    /// The all-tabs button's anchor, which a close question asked from a row hangs from.
+    toggle: Anchor,
+    /// The main terminal's row's focus handle.
+    agent: FocusHandle,
+    /// Each shell tab's row's focus handle and its ×'s, by tab id; a tab listed while the list is open gets them as
+    /// the list draws.
+    rows: HashMap<String, (FocusHandle, FocusHandle)>,
+    /// The list's vertical scroll, through which the focus coordinator brings a row the keyboard reaches into view.
+    scroll: ScrollHandle,
+    /// The row to scroll into view at the list's first draw (the shown tab's, where focus starts), taken by that draw.
+    reveal: Option<usize>,
+    /// The list's layer, so a row can close it.
+    layer: Option<LayerId>,
+}
+
+impl AllTabsMenu {
+    /// The list of `set`'s tabs, below the all-tabs button's `toggle` anchor, with a focus handle for every row.
+    fn new(set: &Entity<TerminalSet>, toggle: Anchor, cx: &mut Context<Self>) -> Self {
+        let rows = set
+            .read(cx)
+            .tabs
+            .iter()
+            .map(|tab| {
+                (
+                    tab.id.clone(),
+                    (
+                        cx.focus_handle().tab_stop(true),
+                        cx.focus_handle().tab_stop(true),
+                    ),
+                )
+            })
+            .collect();
+        let this = set.read(cx);
+        let reveal = match &this.chosen {
+            None => Some(0),
+            Some(id) => this
+                .tabs
+                .iter()
+                .position(|tab| &tab.id == id)
+                .map(|n| n + 1),
+        };
+        AllTabsMenu {
+            set: set.downgrade(),
+            toggle,
+            agent: cx.focus_handle().tab_stop(true),
+            rows,
+            scroll: ScrollHandle::new(),
+            reveal,
+            layer: None,
+        }
+    }
+
+    /// Where focus starts: the shown tab's row, or the main terminal's.
+    fn start(&self, set: &TerminalSet) -> FocusHandle {
+        set.chosen
+            .as_ref()
+            .and_then(|id| self.rows.get(id))
+            .map_or_else(|| self.agent.clone(), |(row, _)| row.clone())
+    }
+
+    /// Close the list if it is still open, which returns focus to the all-tabs button, and hand back the set: what every
+    /// row does before it acts.
+    fn close(
+        menu: &WeakEntity<AllTabsMenu>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<(Entity<TerminalSet>, Anchor)> {
+        let menu = menu.upgrade()?;
+        let (set, toggle, layer) = {
+            let menu = menu.read(cx);
+            (menu.set.upgrade(), menu.toggle.clone(), menu.layer)
+        };
+        if let Some(layer) = layer {
+            layers::close(layer, window, cx);
+        }
+        let set = set?;
+        set.update(cx, |set, cx| {
+            set.all_tabs = None;
+            cx.notify();
+        });
+        Some((set, toggle))
+    }
+
+    /// A row was chosen: close the list, then show tab `id` (`None` for the main terminal) and focus its terminal, with
+    /// a mark taken after the close, so the list's own focus return does not count as the user having moved on.
+    fn choose(
+        menu: &WeakEntity<AllTabsMenu>,
+        id: Option<String>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some((set, _)) = AllTabsMenu::close(menu, window, cx) else {
+            return;
+        };
+        let mark = Mark::take(cx);
+        set.update(cx, |set, cx| set.choose(id, &mark, window, cx));
+    }
+
+    /// A row's × was pressed for tab `id`, named `label` in the list: close the list, then ask (or close, when
+    /// confirmations are skipped) under the all-tabs button, which is still drawn while the tabs overflow; or in the
+    /// middle of the window, if the button went with the list ([`ask_to_close`]).
+    fn close_tab(
+        menu: &WeakEntity<AllTabsMenu>,
+        id: &str,
+        label: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some((set, toggle)) = AllTabsMenu::close(menu, window, cx) else {
+            return;
+        };
+        ask_to_close(&set, id, label, &toggle, window, cx);
+    }
+}
+
+impl Render for AllTabsMenu {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let panel = layers::panel(cx)
+            .id(ALL_TABS_MENU_ID)
+            .debug_selector(|| ALL_TABS_MENU_ID.into())
+            .role(Role::Group)
+            .aria_label("All terminal tabs")
+            .w(px(ALL_TABS_MENU_WIDTH).min(window.viewport_size().width - px(16.)))
+            .max_h(crate::notices_bell::window_cap(window))
+            .overflow_y_scroll();
+        let Some(set) = self.set.upgrade() else {
+            return focus::scroll_region(panel, &self.scroll).into_any_element();
+        };
+        let menu = cx.weak_entity();
+        let (key, chosen, inert, ids) = {
+            let set = set.read(cx);
+            let ids: Vec<String> = set.tabs.iter().map(|tab| tab.id.clone()).collect();
+            (set.key.clone(), set.chosen.clone(), set.inert, ids)
+        };
+        let (main_label, main_help) = main_tab_words(&key, cx);
+        let agent = {
+            let menu = menu.clone();
+            MenuItem::choice(
+                ALL_TABS_AGENT_ID,
+                main_label,
+                HoverHelp::tooltip(main_help),
+                Role::Button,
+                chosen.is_none(),
+            )
+            .reported_pressed()
+            .disabled(inert)
+            .focus(&self.agent)
+            .on_click(move |_, window, cx| AllTabsMenu::choose(&menu, None, window, cx))
+            .into_any_element()
+        };
+        let mut rows = vec![agent];
+        for (index, id) in ids.into_iter().enumerate() {
+            let label = tab_label(index);
+            let (row, close) = self
+                .rows
+                .entry(id.clone())
+                .or_insert_with(|| {
+                    (
+                        cx.focus_handle().tab_stop(true),
+                        cx.focus_handle().tab_stop(true),
+                    )
+                })
+                .clone();
+            let closing = closing(&key, &id, cx);
+            let choose = {
+                let (menu, id) = (menu.clone(), id.clone());
+                MenuItem::choice(
+                    all_tabs_row_id(&id),
+                    label.clone(),
+                    HoverHelp::tooltip(format!("{label}: show this shell tab")),
+                    Role::Button,
+                    chosen.as_deref() == Some(id.as_str()),
+                )
+                .reported_pressed()
+                .disabled(inert)
+                .focus(&row)
+                .on_click(move |_, window, cx| {
+                    AllTabsMenu::choose(&menu, Some(id.clone()), window, cx)
+                })
+            };
+            let close = {
+                let (menu, id, label) = (menu.clone(), id.clone(), label.clone());
+                IconButton::new(
+                    all_tabs_close_id(&id),
+                    Icon::Close,
+                    format!("Close {label}"),
+                    HoverHelp::tooltip(format!(
+                        "Close {label}, ending its shell and everything it started"
+                    ))
+                    .beside_menu(),
+                    Role::Button,
+                )
+                .square(px(ADD_SIDE))
+                .focus(&close)
+                .disabled(inert)
+                .busy(closing)
+                .on_click(move |_, window, cx| {
+                    AllTabsMenu::close_tab(&menu, &id, &label, window, cx)
+                })
+            };
+            rows.push(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .child(div().flex_1().min_w_0().child(choose))
+                    .child(div().flex_none().mr(px(4.)).child(close))
+                    .into_any_element(),
+            );
+        }
+        // Rows that went with their tabs drop their handles.
+        let listed: HashSet<String> = set.read(cx).tabs.iter().map(|tab| tab.id.clone()).collect();
+        self.rows.retain(|id, _| listed.contains(id));
+        if let Some(row) = self.reveal.take() {
+            self.scroll.scroll_to_item(row);
+        }
+        focus::scroll_region(panel.children(rows), &self.scroll).into_any_element()
     }
 }

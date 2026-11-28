@@ -16,13 +16,14 @@
 //! "JetBrains Mono terminal font").
 //!
 //! The Close, Delete and ChevronDown icons are the old app's own action glyphs, copied from its icon module at the
-//! reference commit (14-unit box, 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote
-//! the "⋯" character in text. The four status shapes are the old stylesheet's `.status-dot` shapes (an 8-pixel box: a
-//! filled circle, a triangle cut with `clip-path`, a diamond, and a ring with a 1.5-pixel border), drawn as SVG because
-//! GPUI has no clip path; the view tints them with the status color, as the old dot took `currentColor`. The Spinner is
-//! the old stylesheet's `.delete-spinner`, a 12-pixel ring whose top quarter is solid and the rest 30% of the same
-//! color (its border in `color-mix(in srgb, var(--accent) 30%, transparent)` with `border-top-color: var(--accent)`);
-//! the 30% is the SVG's stroke opacity, so the view still tints it with one color.
+//! reference commit (14-unit box, 1.2 stroke, round caps and joins). ChevronLeft and ChevronRight are new: the same
+//! chevron turned to point sideways, for the terminal tab strip's scroll buttons. The More icon is a new drawing: the
+//! old app wrote the "⋯" character in text. The four status shapes are the old stylesheet's `.status-dot` shapes (an
+//! 8-pixel box: a filled circle, a triangle cut with `clip-path`, a diamond, and a ring with a 1.5-pixel border), drawn
+//! as SVG because GPUI has no clip path; the view tints them with the status color, as the old dot took `currentColor`.
+//! The Spinner is the old stylesheet's `.delete-spinner`, a 12-pixel ring whose top quarter is solid and the rest 30%
+//! of the same color (its border in `color-mix(in srgb, var(--accent) 30%, transparent)` with `border-top-color:
+//! var(--accent)`); the 30% is the SVG's stroke opacity, so the view still tints it with one color.
 //!
 //! The sixteen host marks (`Host*`, the shapes a user picks for a host: cloud, house, flask and so on) are the old
 //! app's `HostMark` drawings, copied from its icon module at the reference commit into one file each: Farhelm's own
@@ -202,6 +203,10 @@ pub enum Icon {
     /// A downward chevron: the closed select's sign that it opens a list (the old app's ChevronDown glyph, which its
     /// split buttons and sort menu drew; the native select it stands in for drew the platform's own chevron).
     ChevronDown,
+    /// A chevron pointing left and one pointing right: the session view's buttons that scroll its overflowing terminal
+    /// tabs back and forward. New drawings, the ChevronDown glyph turned a quarter each way, in its box and stroke.
+    ChevronLeft,
+    ChevronRight,
     /// Two links of a chain: a tunnel from this Mac to a remote host's loopback (the old app's Tunnel glyph, on its
     /// open-tunnels pill and the tunnel warning).
     Tunnel,
@@ -415,6 +420,8 @@ impl Icon {
         Icon::HostCastle,
         Icon::HostLaptop,
         Icon::ChevronDown,
+        Icon::ChevronLeft,
+        Icon::ChevronRight,
         Icon::Tunnel,
         Icon::ZoomOut,
         Icon::Search,
@@ -524,6 +531,8 @@ impl Icon {
             Icon::HostCastle => "icons/host-castle.svg",
             Icon::HostLaptop => "icons/host-laptop.svg",
             Icon::ChevronDown => "icons/chevron-down.svg",
+            Icon::ChevronLeft => "icons/chevron-left.svg",
+            Icon::ChevronRight => "icons/chevron-right.svg",
             Icon::Tunnel => "icons/tunnel.svg",
             Icon::ZoomOut => "icons/zoom-out.svg",
             Icon::Search => "icons/search.svg",
@@ -648,6 +657,8 @@ impl Assets {
             "icons/host-castle.svg" => Some(include_bytes!("../assets/icons/host-castle.svg")),
             "icons/host-laptop.svg" => Some(include_bytes!("../assets/icons/host-laptop.svg")),
             "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),
+            "icons/chevron-left.svg" => Some(include_bytes!("../assets/icons/chevron-left.svg")),
+            "icons/chevron-right.svg" => Some(include_bytes!("../assets/icons/chevron-right.svg")),
             "icons/tunnel.svg" => Some(include_bytes!("../assets/icons/tunnel.svg")),
             "icons/zoom-out.svg" => Some(include_bytes!("../assets/icons/zoom-out.svg")),
             "icons/search.svg" => Some(include_bytes!("../assets/icons/search.svg")),

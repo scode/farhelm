@@ -744,8 +744,25 @@ strip's next draw spends, so a later wheel turn is never pulled back. When focus
 frame as a choice, the focused control wins and the choice's request is dropped. A change of layout reveals the focused
 control and the chosen tab again, since it moves them. GPUI places a reveal against where the frame before left the
 strip's scrolling part, so a draw that moves that part (the strip's first, a change of layout or width) asks once more
-in the next frame. Whether the strip pins its main tab and New terminal is decided from its own and its main tab's
-widths as last laid out, neither of which depends on that decision, so a change of width settles within a frame.
+in the next frame, and so does a draw that decides to show or hide the overflow controls, since the next frame moves it.
+Whether the strip pins its main tab and New terminal is decided from its own and its main tab's widths as last laid out,
+neither of which depends on that decision, so a change of width settles within a frame.
+
+The strip's overflow controls (edge fades, scroll buttons, the all-tabs list) show only while the shell tabs are wider
+than the room they would have without the controls, and showing them must not change that answer. Beside a tunnel pill
+the top row shares a short row in proportion to content widths, so controls that only added to the strip's content would
+widen the strip and could make the tabs fit, and the controls would then come and go on alternate frames. While they
+show, the box around the shell tabs is therefore capped (`max_w`) at the tabs' own width less the controls', which keeps
+the strip's content width, and so its width, what it is without them. The decision reads both widths as the strip is
+laid out, draws once more before deciding when its cap came from other widths, and keeps a pixel of hysteresis against
+rounding. Which controls show (the all-tabs button alone in a tight strip) is a width tier decided like the pinning. The
+fades are painted by a canvas from the scroll position as laid out, leaving out a fade that would cover the focused
+control, and the scroll buttons jump by a step: neither animates, so neither goes through `components::transition`. A
+step that disables the focused scroll button moves focus to the other, since the coordinator's recovery would put it on
+the terminal. The all-tabs list is a menu layer (`layers::panel`: Tab and the arrows stay inside, and focus returns to
+the button). Each row is drawn as a menu item but is a button reporting itself pressed when its tab is shown, with its
+close button beside it, never a control inside a control: the list is a group, since a menu could not hold the close
+buttons.
 
 ### Overlays: the layer manager
 
